@@ -94,18 +94,13 @@ pub enum Outcome {
 }
 
 /// Policy for recovering completed ReadOnly effects.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReadRecoveryPolicy {
     /// Always replay for fresh data (default).
+    #[default]
     ReplayFresh,
     /// Return the sealed snapshot.
     ReturnSealed,
-}
-
-impl Default for ReadRecoveryPolicy {
-    fn default() -> Self {
-        Self::ReplayFresh
-    }
 }
 
 /// Action the recovery engine should take for a given effect.

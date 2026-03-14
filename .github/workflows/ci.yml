@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v1
+      - uses: EmbarkStudios/cargo-deny-action@v2
 
   python:
     name: Python
@@ -58,25 +58,37 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install deps
-        run: pip install maturin pytest pytest-asyncio ruff
+      - name: Create virtualenv and install deps
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install maturin pytest pytest-asyncio ruff
 
       - name: Build bindings
         working-directory: bindings/python
-        run: maturin develop --all-features
+        run: |
+          source ${{ github.workspace }}/.venv/bin/activate
+          maturin develop --all-features
 
       - name: Ruff lint
-        run: ruff check bindings/python/python/ examples/
+        run: |
+          source .venv/bin/activate
+          ruff check bindings/python/python/ examples/
 
       - name: Ruff format check
-        run: ruff format --check bindings/python/python/ examples/
+        run: |
+          source .venv/bin/activate
+          ruff format --check bindings/python/python/ examples/
 
       - name: Pytest
         working-directory: bindings/python
-        run: pytest tests/ -v
+        run: |
+          source ${{ github.workspace }}/.venv/bin/activate
+          pytest tests/ -v
 
       - name: Run examples
         run: |
+          source .venv/bin/activate
           python examples/crash_recovery.py
           python examples/langgraph_integration.py
           python examples/openai_agents_integration.py
