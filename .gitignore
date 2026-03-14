@@ -22,7 +22,6 @@ dist/
 
 # Docs
 /docs/
-/blog/
 
 # Claude
 .claude/
