@@ -227,9 +227,15 @@ impl PyEffectLog {
             serde_json::from_str(&args_str).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
         let inner = Arc::clone(&self.inner);
-        let result = self.runtime.block_on(async {
-            let log = inner.lock().await;
-            log.execute(&tool_name, input).await
+        let runtime = self.runtime;
+
+        // Release the GIL before block_on: the tool function will need to
+        // re-acquire it via Python::with_gil, so holding it here deadlocks.
+        let result = py.allow_threads(|| {
+            runtime.block_on(async {
+                let log = inner.lock().await;
+                log.execute(&tool_name, input).await
+            })
         });
 
         match result {
@@ -256,9 +262,12 @@ impl PyEffectLog {
     /// Get the execution history.
     fn history(&self, py: Python<'_>) -> PyResult<PyObject> {
         let inner = Arc::clone(&self.inner);
-        let result = self.runtime.block_on(async {
-            let log = inner.lock().await;
-            log.history().await
+        let runtime = self.runtime;
+        let result = py.allow_threads(|| {
+            runtime.block_on(async {
+                let log = inner.lock().await;
+                log.history().await
+            })
         });
 
         match result {

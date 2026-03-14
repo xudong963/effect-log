@@ -99,8 +99,7 @@ impl EffectStore for InMemoryStore {
     ) -> Result<Option<IntentRecord>, StorageError> {
         let intents = self.intents.read().await;
         let found = intents.values().find(|i| {
-            i.cursor.execution_id == execution_id
-                && i.idempotency_key.as_deref() == Some(key)
+            i.cursor.execution_id == execution_id && i.idempotency_key.as_deref() == Some(key)
         });
         Ok(found.cloned())
     }

@@ -57,7 +57,10 @@ pub enum EffectLogError {
     ToolTimeout { effect_id: EffectId },
 
     #[error("tool panicked for effect {effect_id}: {message}")]
-    ToolPanicked { effect_id: EffectId, message: String },
+    ToolPanicked {
+        effect_id: EffectId,
+        message: String,
+    },
 
     #[error("duplicate idempotency key: {key}")]
     DuplicateIdempotencyKey { key: String },
