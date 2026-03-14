@@ -94,6 +94,10 @@ pytest tests/ -v
 - [ ] Additional backends — RocksDB, S3, Restate journal
 - [ ] Auto-classification — infer effect kind from HTTP methods / API metadata
 
+## Inspiration
+
+The idea behind this project was inspired by a blog post from [Guanlan Dai](https://www.linkedin.com/in/guanlandai/). He introduced the concepts of effect log and semantic correctness.
+
 ## License
 
 MIT OR Apache-2.0
