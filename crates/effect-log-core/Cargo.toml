@@ -1,0 +1,27 @@
+[package]
+name = "effect-log-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Semantic side-effect tracking for AI agents"
+
+[features]
+default = ["sqlite"]
+sqlite = ["dep:tokio-rusqlite", "dep:rusqlite"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+tokio-rusqlite = { workspace = true, optional = true }
+rusqlite = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+tempfile = "3"
