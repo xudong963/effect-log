@@ -100,4 +100,4 @@ The idea behind this project was inspired by a blog post from [Guanlan Dai](http
 
 ## License
 
-MIT OR Apache-2.0
+Apache-2.0
