@@ -5,7 +5,7 @@ CrewAI integration example for effect-log.
 This example runs standalone. With crewai installed,
 you can also use the middleware wrappers shown in comments.
 
-    pip install effect-log crewai
+    pip install ai-effectlog crewai
 """
 
 import os

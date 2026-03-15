@@ -5,7 +5,7 @@ LangGraph integration example for effect-log.
 This example runs standalone. With langchain-core/langgraph installed,
 you can also use the middleware wrappers shown in comments.
 
-    pip install effect-log langchain-core langgraph
+    pip install ai-effectlog langchain-core langgraph
 """
 
 import os

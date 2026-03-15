@@ -3,8 +3,7 @@
 End-to-end OpenAI Agents SDK + effect-log example.
 
 Setup:
-    cd bindings/python && maturin develop   # install effect-log from source
-    pip install openai-agents               # install the OpenAI Agents SDK
+    pip install ai-effectlog openai-agents
 
 Set your API key:
     export OPENAI_API_KEY="sk-..."

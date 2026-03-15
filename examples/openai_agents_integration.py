@@ -5,7 +5,7 @@ OpenAI Agents SDK integration example for effect-log.
 This example runs standalone. With openai-agents installed,
 you can also use the middleware wrappers shown in comments.
 
-    pip install effect-log openai-agents
+    pip install ai-effectlog openai-agents
 """
 
 import os
