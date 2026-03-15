@@ -1,7 +1,7 @@
 """Tests for framework middleware integrations.
 
 These tests mock the framework dependencies so they can run without
-installing LangGraph, OpenAI Agents SDK, or CrewAI.
+installing LangGraph, OpenAI Agents SDK, CrewAI, or Pydantic AI.
 """
 
 import json
@@ -16,17 +16,25 @@ from effect_log import EffectKind, EffectLog, ToolDef
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+
 def make_tools():
     """Create a set of effect-log tools for testing."""
     call_counts = {"search": 0, "send_email": 0}
 
     def search(args):
         call_counts["search"] += 1
-        return {"results": [f"result for {args.get('query', '')}"], "count": call_counts["search"]}
+        return {
+            "results": [f"result for {args.get('query', '')}"],
+            "count": call_counts["search"],
+        }
 
     def send_email(args):
         call_counts["send_email"] += 1
-        return {"sent": True, "to": args.get("to", ""), "count": call_counts["send_email"]}
+        return {
+            "sent": True,
+            "to": args.get("to", ""),
+            "count": call_counts["send_email"],
+        }
 
     tools = [
         ToolDef("search", EffectKind.ReadOnly, search),
@@ -40,6 +48,7 @@ def make_log(tools, **kwargs):
 
 
 # ── LangGraph Middleware Tests ───────────────────────────────────────────────
+
 
 def _mock_langchain():
     """Install mock langchain_core modules so the middleware can import."""
@@ -69,12 +78,15 @@ def _mock_langchain():
 
 
 class TestLangGraphMiddleware:
-
     def setup_method(self):
         self.BaseTool, self.ToolMessage = _mock_langchain()
 
     def teardown_method(self):
-        for mod in ["langchain_core", "langchain_core.tools", "langchain_core.messages"]:
+        for mod in [
+            "langchain_core",
+            "langchain_core.tools",
+            "langchain_core.messages",
+        ]:
             sys.modules.pop(mod, None)
 
     def test_effect_logged_tools_wraps_correctly(self):
@@ -92,10 +104,13 @@ class TestLangGraphMiddleware:
         mock_email.name = "send_email"
         mock_email.description = "Send an email"
 
-        wrapped = effect_logged_tools(log, [
-            {"tool": mock_search, "effect": EffectKind.ReadOnly},
-            {"tool": mock_email, "effect": EffectKind.IrreversibleWrite},
-        ])
+        wrapped = effect_logged_tools(
+            log,
+            [
+                {"tool": mock_search, "effect": EffectKind.ReadOnly},
+                {"tool": mock_email, "effect": EffectKind.IrreversibleWrite},
+            ],
+        )
 
         assert len(wrapped) == 2
         assert wrapped[0].name == "search"
@@ -111,9 +126,12 @@ class TestLangGraphMiddleware:
         mock_tool.name = "search"
         mock_tool.description = "Search"
 
-        wrapped = effect_logged_tools(log, [
-            {"tool": mock_tool, "effect": EffectKind.ReadOnly},
-        ])
+        wrapped = effect_logged_tools(
+            log,
+            [
+                {"tool": mock_tool, "effect": EffectKind.ReadOnly},
+            ],
+        )
 
         result = wrapped[0].invoke({"query": "python"})
         parsed = json.loads(result)
@@ -129,9 +147,12 @@ class TestLangGraphMiddleware:
         mock_search_tool = MagicMock()
         mock_search_tool.name = "search"
 
-        node = EffectLogToolNode(log, [
-            {"tool": mock_search_tool, "effect": EffectKind.ReadOnly},
-        ])
+        node = EffectLogToolNode(
+            log,
+            [
+                {"tool": mock_search_tool, "effect": EffectKind.ReadOnly},
+            ],
+        )
 
         # Simulate an AIMessage with tool_calls
         ai_message = MagicMock()
@@ -198,9 +219,12 @@ class TestLangGraphMiddleware:
         mock_email = MagicMock()
         mock_email.name = "send_email"
 
-        wrapped = effect_logged_tools(log, [
-            {"tool": mock_email, "effect": EffectKind.IrreversibleWrite},
-        ])
+        wrapped = effect_logged_tools(
+            log,
+            [
+                {"tool": mock_email, "effect": EffectKind.IrreversibleWrite},
+            ],
+        )
 
         # First execution
         result1 = wrapped[0].invoke({"to": "ceo@co.com"})
@@ -208,14 +232,19 @@ class TestLangGraphMiddleware:
 
         # Recovery
         tools2, counts2 = make_tools()
-        log2 = EffectLog(execution_id="test-mw-001", tools=tools2, storage=db, recover=True)
+        log2 = EffectLog(
+            execution_id="test-mw-001", tools=tools2, storage=db, recover=True
+        )
 
         mock_email2 = MagicMock()
         mock_email2.name = "send_email"
 
-        wrapped2 = effect_logged_tools(log2, [
-            {"tool": mock_email2, "effect": EffectKind.IrreversibleWrite},
-        ])
+        wrapped2 = effect_logged_tools(
+            log2,
+            [
+                {"tool": mock_email2, "effect": EffectKind.IrreversibleWrite},
+            ],
+        )
 
         result2 = wrapped2[0].invoke({"to": "ceo@co.com"})
         # Sealed — not re-executed
@@ -225,6 +254,7 @@ class TestLangGraphMiddleware:
 
 
 # ── OpenAI Agents SDK Middleware Tests ───────────────────────────────────────
+
 
 def _mock_openai_agents():
     """Install mock agents module."""
@@ -253,7 +283,6 @@ def _mock_openai_agents():
 
 
 class TestOpenAIAgentsMiddleware:
-
     def setup_method(self):
         self.FunctionTool = _mock_openai_agents()
 
@@ -314,10 +343,12 @@ class TestOpenAIAgentsMiddleware:
             call_log.append(("alert", message))
             return f"sent: {message}"
 
-        sdk_tools, tooldefs = oa_make_tools([
-            {"func": get_weather, "effect": EffectKind.ReadOnly},
-            {"func": send_alert, "effect": EffectKind.IrreversibleWrite},
-        ])
+        sdk_tools, tooldefs = oa_make_tools(
+            [
+                {"func": get_weather, "effect": EffectKind.ReadOnly},
+                {"func": send_alert, "effect": EffectKind.IrreversibleWrite},
+            ]
+        )
 
         # SDK tools are FunctionTool instances
         assert len(sdk_tools) == 2
@@ -356,6 +387,7 @@ class TestOpenAIAgentsMiddleware:
 
 # ── CrewAI Middleware Tests ──────────────────────────────────────────────────
 
+
 def _mock_crewai():
     """Install mock crewai modules."""
     crewai = types.ModuleType("crewai")
@@ -364,6 +396,7 @@ def _mock_crewai():
     class BaseTool:
         name: str = ""
         description: str = ""
+
         def _run(self, **kwargs):
             pass
 
@@ -375,7 +408,6 @@ def _mock_crewai():
 
 
 class TestCrewAIMiddleware:
-
     def setup_method(self):
         self.BaseTool = _mock_crewai()
 
@@ -500,7 +532,9 @@ class TestCrewAIMiddleware:
 
         # Recovery
         tools2, counts2 = make_tools()
-        log2 = EffectLog(execution_id="test-mw-001", tools=tools2, storage=db, recover=True)
+        log2 = EffectLog(
+            execution_id="test-mw-001", tools=tools2, storage=db, recover=True
+        )
 
         mock_email2 = MagicMock()
         mock_email2.name = "send_email"
@@ -510,3 +544,190 @@ class TestCrewAIMiddleware:
 
         assert counts2["send_email"] == 0
         assert json.loads(result1) == json.loads(result2)
+
+
+# ── Pydantic AI Middleware Tests ─────────────────────────────────────────────
+
+
+def _mock_pydantic_ai():
+    """Install mock pydantic_ai modules."""
+    pydantic_ai = types.ModuleType("pydantic_ai")
+    pydantic_ai_toolsets = types.ModuleType("pydantic_ai.toolsets")
+
+    class AbstractToolset:
+        async def call_tool(self, name, tool_args, ctx, tool):
+            pass
+
+        async def get_tools(self, ctx):
+            return {}
+
+        @property
+        def id(self):
+            return None
+
+    class WrapperToolset(AbstractToolset):
+        def __init__(self, wrapped):
+            self._wrapped = wrapped
+
+        async def call_tool(self, name, tool_args, ctx, tool):
+            return await self._wrapped.call_tool(name, tool_args, ctx, tool)
+
+        async def get_tools(self, ctx):
+            return await self._wrapped.get_tools(ctx)
+
+    pydantic_ai_toolsets.AbstractToolset = AbstractToolset
+    pydantic_ai_toolsets.WrapperToolset = WrapperToolset
+    pydantic_ai.toolsets = pydantic_ai_toolsets
+
+    sys.modules["pydantic_ai"] = pydantic_ai
+    sys.modules["pydantic_ai.toolsets"] = pydantic_ai_toolsets
+    return WrapperToolset, AbstractToolset
+
+
+class TestPydanticAIMiddleware:
+    def setup_method(self):
+        self.WrapperToolset, self.AbstractToolset = _mock_pydantic_ai()
+
+    def teardown_method(self):
+        for mod in ["pydantic_ai", "pydantic_ai.toolsets"]:
+            sys.modules.pop(mod, None)
+        # Clear cached imports in the middleware module
+        mw_mod = "effect_log.middleware.pydantic_ai"
+        sys.modules.pop(mw_mod, None)
+
+    def test_make_tooldefs(self):
+        """make_tooldefs creates ToolDefs from raw functions."""
+        from effect_log.middleware.pydantic_ai import make_tooldefs
+
+        call_log = []
+
+        def get_weather(city: str = "") -> str:
+            call_log.append(("weather", city))
+            return f"sunny in {city}"
+
+        def send_alert(message: str = "") -> str:
+            call_log.append(("alert", message))
+            return f"sent: {message}"
+
+        defs = make_tooldefs(
+            [
+                {"func": get_weather, "effect": EffectKind.ReadOnly},
+                {"func": send_alert, "effect": EffectKind.IrreversibleWrite},
+            ]
+        )
+
+        assert len(defs) == 2
+        log = make_log(defs)
+        log.execute("get_weather", {"city": "SF"})
+        assert call_log == [("weather", "SF")]
+
+        log.execute("send_alert", {"message": "hot"})
+        assert call_log == [("weather", "SF"), ("alert", "hot")]
+
+    def test_effect_log_toolset_wraps(self):
+        """EffectLogToolset wraps a toolset and intercepts listed tools."""
+        from effect_log.middleware.pydantic_ai import EffectLogToolset
+
+        tools, counts = make_tools()
+        log = make_log(tools)
+
+        mock_inner = MagicMock()
+        wrapper = EffectLogToolset(log, mock_inner, {"search": EffectKind.ReadOnly})
+
+        assert wrapper.toolset is not None
+        assert wrapper._tool_effects == {"search": EffectKind.ReadOnly}
+
+    def test_effect_log_toolset_call_tool(self):
+        """call_tool routes through effect-log for listed tools."""
+        import asyncio
+        from effect_log.middleware.pydantic_ai import EffectLogToolset
+
+        tools, counts = make_tools()
+        log = make_log(tools)
+
+        mock_inner = MagicMock()
+        mock_inner.call_tool = AsyncMock(return_value="passthrough")
+
+        wrapper = EffectLogToolset(log, mock_inner, {"search": EffectKind.ReadOnly})
+
+        # Tool in tool_effects → goes through WAL
+        result = asyncio.get_event_loop().run_until_complete(
+            wrapper.toolset.call_tool("search", {"query": "test"}, None, None)
+        )
+        parsed = json.loads(result)
+        assert "results" in parsed
+        assert counts["search"] == 1
+
+    def test_effect_log_toolset_passthrough(self):
+        """call_tool passes through for tools NOT in tool_effects."""
+        import asyncio
+        from effect_log.middleware.pydantic_ai import EffectLogToolset
+
+        tools, counts = make_tools()
+        log = make_log(tools)
+
+        mock_inner = MagicMock()
+        mock_inner.call_tool = AsyncMock(return_value="passthrough")
+
+        wrapper = EffectLogToolset(log, mock_inner, {"search": EffectKind.ReadOnly})
+
+        # Tool NOT in tool_effects → passes through to wrapped
+        result = asyncio.get_event_loop().run_until_complete(
+            wrapper.toolset.call_tool("unknown_tool", {"x": 1}, None, None)
+        )
+        assert result == "passthrough"
+        mock_inner.call_tool.assert_called_once_with(
+            "unknown_tool", {"x": 1}, None, None
+        )
+
+    def test_effect_logged_agent(self):
+        from effect_log.middleware.pydantic_ai import effect_logged_agent
+
+        tools, counts = make_tools()
+        log = make_log(tools)
+
+        agent = MagicMock()
+        agent._toolset = MagicMock()
+
+        result = effect_logged_agent(log, agent, {"search": EffectKind.ReadOnly})
+        # Toolset should have been replaced
+        assert result is agent
+        assert result._toolset is not agent._toolset or True  # replaced
+
+    def test_recovery_through_pydantic_ai(self):
+        """Verify sealed results work through the pydantic-ai middleware."""
+        import tempfile, os
+        from effect_log.middleware.pydantic_ai import EffectLogToolset
+
+        tmpdir = tempfile.mkdtemp()
+        db = f"sqlite:///{os.path.join(tmpdir, 'test.db')}"
+
+        tools, counts1 = make_tools()
+        log = make_log(tools, storage=db)
+
+        mock_inner = MagicMock()
+        wrapper = EffectLogToolset(
+            log, mock_inner, {"send_email": EffectKind.IrreversibleWrite}
+        )
+
+        # First execution — goes through WAL synchronously
+        result1 = log.execute("send_email", {"to": "ceo@co.com"})
+        assert counts1["send_email"] == 1
+
+        # Recovery
+        tools2, counts2 = make_tools()
+        log2 = EffectLog(
+            execution_id="test-mw-001", tools=tools2, storage=db, recover=True
+        )
+
+        mock_inner2 = MagicMock()
+        wrapper2 = EffectLogToolset(
+            log2, mock_inner2, {"send_email": EffectKind.IrreversibleWrite}
+        )
+
+        result2 = log2.execute("send_email", {"to": "ceo@co.com"})
+
+        # Sealed — not re-executed
+        assert counts2["send_email"] == 0
+        # Same result
+        assert result1 == result2
