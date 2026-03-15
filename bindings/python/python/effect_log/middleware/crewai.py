@@ -72,6 +72,41 @@ class EffectLoggedCrewAITool:
         return self.run(*args, **kwargs)
 
 
+def make_tooldefs(tool_specs):
+    """Create ToolDef entries from CrewAI SDK tool objects.
+
+    Eliminates the need to define tool functions twice — once for the SDK
+    and once for EffectLog. Handles both custom @tool functions (which have
+    a .func attribute) and pre-built tools (which use ._run()).
+
+    Args:
+        tool_specs: List of dicts with keys:
+            - "tool": A CrewAI BaseTool or @tool-decorated function
+            - "effect": The EffectKind for this tool
+
+    Returns:
+        List of ToolDef instances ready for EffectLog construction.
+    """
+    from effect_log import ToolDef
+
+    defs = []
+    for spec in tool_specs:
+        tool, effect = spec["tool"], spec["effect"]
+        name = getattr(tool, "name", getattr(tool, "__name__", str(tool)))
+        fn = getattr(tool, "func", None)
+        if fn is not None:
+
+            def adapted(args, _fn=fn):
+                return _fn(**args)
+        else:
+
+            def adapted(args, _tool=tool):
+                return _tool._run(**args)
+
+        defs.append(ToolDef(name, effect, adapted))
+    return defs
+
+
 def effect_logged_tool(
     log: Any,
     tool: Any,

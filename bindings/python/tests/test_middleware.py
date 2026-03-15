@@ -148,6 +148,42 @@ class TestLangGraphMiddleware:
         assert "results" in msg.content
         assert counts["search"] == 1
 
+    def test_make_tooldefs_with_func(self):
+        """make_tooldefs uses .func when available (custom @tool)."""
+        from effect_log.middleware.langgraph import make_tooldefs
+
+        call_log = []
+
+        def my_search(query=""):
+            call_log.append(("search", query))
+            return f"results for {query}"
+
+        mock_tool = MagicMock()
+        mock_tool.name = "search"
+        mock_tool.func = my_search  # custom @tool has .func
+
+        defs = make_tooldefs([{"tool": mock_tool, "effect": EffectKind.ReadOnly}])
+        assert len(defs) == 1
+
+        log = make_log(defs)
+        result = log.execute("search", {"query": "python"})
+        assert call_log == [("search", "python")]
+
+    def test_make_tooldefs_without_func(self):
+        """make_tooldefs falls back to .invoke() for pre-built tools."""
+        from effect_log.middleware.langgraph import make_tooldefs
+
+        mock_tool = MagicMock()
+        mock_tool.name = "tavily_search"
+        del mock_tool.func  # pre-built tool has no .func
+        mock_tool.invoke.return_value = "search results"
+
+        defs = make_tooldefs([{"tool": mock_tool, "effect": EffectKind.ReadOnly}])
+        log = make_log(defs)
+        result = log.execute("tavily_search", {"query": "test"})
+
+        mock_tool.invoke.assert_called_once_with({"query": "test"})
+
     def test_recovery_through_langgraph(self):
         """Verify sealed results work through the LangGraph middleware."""
         import tempfile, os
@@ -201,7 +237,17 @@ def _mock_openai_agents():
             self.params_json_schema = params_json_schema
             self.on_invoke_tool = on_invoke_tool
 
+    def function_tool(fn):
+        """Mock @function_tool decorator."""
+        return FunctionTool(
+            name=fn.__name__,
+            description=fn.__doc__ or "",
+            params_json_schema={},
+            on_invoke_tool=AsyncMock(),
+        )
+
     agents_mod.FunctionTool = FunctionTool
+    agents_mod.function_tool = function_tool
     sys.modules["agents"] = agents_mod
     return FunctionTool
 
@@ -251,6 +297,41 @@ class TestOpenAIAgentsMiddleware:
         parsed = json.loads(result)
         assert "results" in parsed
         assert counts["search"] == 1
+
+    def test_make_tools_creates_both(self):
+        """make_tools returns (sdk_tools, tooldefs) from raw functions."""
+        from effect_log.middleware.openai_agents import make_tools as oa_make_tools
+
+        call_log = []
+
+        def get_weather(city: str) -> str:
+            """Get weather."""
+            call_log.append(("weather", city))
+            return f"sunny in {city}"
+
+        def send_alert(message: str) -> str:
+            """Send alert."""
+            call_log.append(("alert", message))
+            return f"sent: {message}"
+
+        sdk_tools, tooldefs = oa_make_tools([
+            {"func": get_weather, "effect": EffectKind.ReadOnly},
+            {"func": send_alert, "effect": EffectKind.IrreversibleWrite},
+        ])
+
+        # SDK tools are FunctionTool instances
+        assert len(sdk_tools) == 2
+        assert sdk_tools[0].name == "get_weather"
+        assert sdk_tools[1].name == "send_alert"
+
+        # ToolDefs work with EffectLog
+        assert len(tooldefs) == 2
+        log = make_log(tooldefs)
+        log.execute("get_weather", {"city": "SF"})
+        assert call_log == [("weather", "SF")]
+
+        log.execute("send_alert", {"message": "hot"})
+        assert call_log == [("weather", "SF"), ("alert", "hot")]
 
     def test_effect_logged_agent(self):
         from effect_log.middleware.openai_agents import effect_logged_agent
@@ -364,6 +445,40 @@ class TestCrewAIMiddleware:
         result = effect_logged_crew(log, crew, {"search": EffectKind.ReadOnly})
         assert len(result.agents[0].tools) == 1
         assert result.agents[0].tools[0].name == "search"
+
+    def test_make_tooldefs_with_func(self):
+        """make_tooldefs uses .func when available (custom @tool)."""
+        from effect_log.middleware.crewai import make_tooldefs
+
+        call_log = []
+
+        def my_search(query=""):
+            call_log.append(("search", query))
+            return f"results for {query}"
+
+        mock_tool = MagicMock()
+        mock_tool.name = "search"
+        mock_tool.func = my_search
+
+        defs = make_tooldefs([{"tool": mock_tool, "effect": EffectKind.ReadOnly}])
+        log = make_log(defs)
+        log.execute("search", {"query": "ai"})
+        assert call_log == [("search", "ai")]
+
+    def test_make_tooldefs_without_func(self):
+        """make_tooldefs falls back to ._run() for pre-built tools."""
+        from effect_log.middleware.crewai import make_tooldefs
+
+        mock_tool = MagicMock()
+        mock_tool.name = "serper_search"
+        del mock_tool.func  # pre-built tool has no .func
+        mock_tool._run.return_value = "search results"
+
+        defs = make_tooldefs([{"tool": mock_tool, "effect": EffectKind.ReadOnly}])
+        log = make_log(defs)
+        log.execute("serper_search", {"query": "test"})
+
+        mock_tool._run.assert_called_once_with(query="test")
 
     def test_recovery_through_crewai(self):
         """Verify sealed results work through the CrewAI middleware."""

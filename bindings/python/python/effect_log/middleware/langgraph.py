@@ -101,6 +101,40 @@ def effect_logged_tools(
     return wrapped
 
 
+def make_tooldefs(tool_specs):
+    """Create ToolDef entries from LangChain SDK tool objects.
+
+    Eliminates the need to define tool functions twice — once for the SDK
+    and once for EffectLog. Handles both custom @tool functions (which have
+    a .func attribute) and pre-built tools (which use .invoke()).
+
+    Args:
+        tool_specs: List of dicts with keys:
+            - "tool": A LangChain BaseTool or @tool-decorated function
+            - "effect": The EffectKind for this tool
+
+    Returns:
+        List of ToolDef instances ready for EffectLog construction.
+    """
+    from effect_log import ToolDef
+
+    defs = []
+    for spec in tool_specs:
+        tool, effect = spec["tool"], spec["effect"]
+        fn = getattr(tool, "func", None)
+        if fn is not None:
+
+            def adapted(args, _fn=fn):
+                return _fn(**args)
+        else:
+
+            def adapted(args, _tool=tool):
+                return _tool.invoke(args)
+
+        defs.append(ToolDef(tool.name, effect, adapted))
+    return defs
+
+
 class EffectLogToolNode:
     """Drop-in replacement for LangGraph's ToolNode that routes through effect-log.
 
