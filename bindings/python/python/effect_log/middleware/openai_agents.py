@@ -33,6 +33,41 @@ def _ensure_openai_agents():
         )
 
 
+def make_tools(specs):
+    """Create both FunctionTool and ToolDef entries from raw functions.
+
+    OpenAI's @function_tool hides the function in a closure (no .func),
+    so this helper takes raw functions *before* decoration and produces
+    both the SDK tool and the EffectLog ToolDef.
+
+    Pre-built OpenAI tools (WebSearchTool, FileSearchTool, etc.) execute
+    on OpenAI's side and cannot be effect-logged — pass them through
+    unchanged in effect_logged_agent().
+
+    Args:
+        specs: List of dicts with keys:
+            - "func": A raw callable (not yet decorated with @function_tool)
+            - "effect": The EffectKind for this tool
+
+    Returns:
+        Tuple of (list[FunctionTool], list[ToolDef]).
+    """
+    _ensure_openai_agents()
+    from agents import function_tool as ft
+    from effect_log import ToolDef
+
+    sdk_tools, tooldefs = [], []
+    for spec in specs:
+        fn, effect = spec["func"], spec["effect"]
+        sdk_tools.append(ft(fn))
+
+        def adapted(args, _fn=fn):
+            return _fn(**args)
+
+        tooldefs.append(ToolDef(fn.__name__, effect, adapted))
+    return sdk_tools, tooldefs
+
+
 def wrap_function_tool(log: Any, tool: Any, effect_kind: Any = None) -> Any:
     """Wrap an OpenAI Agents SDK FunctionTool to route through effect-log.
 
