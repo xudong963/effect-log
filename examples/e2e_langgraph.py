@@ -3,8 +3,7 @@
 End-to-end LangGraph + effect-log example.
 
 Setup:
-    cd bindings/python && maturin develop   # install effect-log from source
-    pip install langchain-core langchain-openai langgraph  # install LangGraph
+    pip install ai-effectlog langchain-core langchain-openai langgraph
 
 Set your API key:
     export OPENAI_API_KEY="sk-..."

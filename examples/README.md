@@ -2,16 +2,15 @@
 
 ## Prerequisites
 
-1. **Rust toolchain** (1.75+) and **maturin** (`pip install maturin`)
+1. Python 3.8+
 2. A Python virtual environment (the project already has one at `.venv/`)
 
 ## Setup
 
-Build and install the `effect-log` Python package in dev mode:
+Install the `ai-effectlog` package from PyPI:
 
 ```bash
-cd bindings/python
-maturin develop
+pip install ai-effectlog
 ```
 
 If you're using the project's existing venv, activate it first:
@@ -47,15 +46,15 @@ They require the corresponding SDK packages **and** an `OPENAI_API_KEY`.
 export OPENAI_API_KEY="sk-..."
 
 # OpenAI Agents SDK
-pip install openai-agents
+pip install ai-effectlog openai-agents
 python examples/e2e_openai_agents.py
 
 # CrewAI
-pip install crewai crewai-tools
+pip install ai-effectlog crewai crewai-tools
 python examples/e2e_crewai.py
 
 # LangGraph
-pip install langchain-core langchain-openai langgraph
+pip install ai-effectlog langchain-core langchain-openai langgraph
 python examples/e2e_langgraph.py
 ```
 

@@ -3,8 +3,7 @@
 End-to-end CrewAI + effect-log example.
 
 Setup:
-    cd bindings/python && maturin develop   # install effect-log from source
-    pip install crewai crewai-tools         # install the CrewAI SDK
+    pip install ai-effectlog crewai crewai-tools
 
 Set your API key (CrewAI uses OpenAI by default):
     export OPENAI_API_KEY="sk-..."
