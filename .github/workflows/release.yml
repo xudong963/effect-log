@@ -38,7 +38,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: aarch64-unknown-linux-gnu
-          args: --release --out dist --manifest-path bindings/python/Cargo.toml
+          args: --release --out dist --manifest-path bindings/python/Cargo.toml --zig -i 3.9 3.10 3.11 3.12 3.13
           manylinux: auto
       - uses: actions/upload-artifact@v4
         with:
@@ -46,7 +46,7 @@ jobs:
           path: dist
 
   macos-x86_64:
-    runs-on: macos-13
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
