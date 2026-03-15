@@ -54,10 +54,12 @@ async def main():
     db = f"sqlite:///{os.path.join(tmpdir, 'effects.db')}"
 
     # 1. Create SDK tools + EffectLog ToolDefs from the same functions
-    sdk_tools, tooldefs = make_tools([
-        {"func": get_weather, "effect": EffectKind.ReadOnly},
-        {"func": send_alert, "effect": EffectKind.IrreversibleWrite},
-    ])
+    sdk_tools, tooldefs = make_tools(
+        [
+            {"func": get_weather, "effect": EffectKind.ReadOnly},
+            {"func": send_alert, "effect": EffectKind.IrreversibleWrite},
+        ]
+    )
 
     # 2. Build EffectLog with the generated ToolDefs
     log = EffectLog(execution_id="weather-agent-run-1", tools=tooldefs, storage=db)
@@ -77,14 +79,18 @@ async def main():
 
     # 5. Run the agent
     print("=== Running agent ===\n")
-    result = await Runner.run(agent, "Check the weather in San Francisco and send an alert about it.")
+    result = await Runner.run(
+        agent, "Check the weather in San Francisco and send an alert about it."
+    )
     print(f"Agent output: {result.final_output}\n")
 
     # 6. Show effect-log history
     print("=== Effect-log history ===\n")
     for entry in log.history():
-        print(f"  seq={entry['sequence']}  tool={entry['tool_name']:<15}  "
-              f"effect={entry['effect_kind']:<20}  outcome={entry['outcome']}")
+        print(
+            f"  seq={entry['sequence']}  tool={entry['tool_name']:<15}  "
+            f"effect={entry['effect_kind']:<20}  outcome={entry['outcome']}"
+        )
 
     print(f"\n  get_weather called: {call_counts['get_weather']} time(s)")
     print(f"  send_alert  called: {call_counts['send_alert']} time(s)")
@@ -95,10 +101,12 @@ async def main():
     for k in call_counts:
         call_counts[k] = 0
 
-    _, tooldefs2 = make_tools([
-        {"func": get_weather, "effect": EffectKind.ReadOnly},
-        {"func": send_alert, "effect": EffectKind.IrreversibleWrite},
-    ])
+    _, tooldefs2 = make_tools(
+        [
+            {"func": get_weather, "effect": EffectKind.ReadOnly},
+            {"func": send_alert, "effect": EffectKind.IrreversibleWrite},
+        ]
+    )
     log2 = EffectLog(
         execution_id="weather-agent-run-1", tools=tooldefs2, storage=db, recover=True
     )
@@ -107,8 +115,12 @@ async def main():
     for entry in log.history():
         log2.execute(entry["tool_name"], {})
 
-    print(f"  get_weather re-executed: {call_counts['get_weather']} (ReadOnly -> replayed)")
-    print(f"  send_alert  re-executed: {call_counts['send_alert']} (IrreversibleWrite -> SEALED)")
+    print(
+        f"  get_weather re-executed: {call_counts['get_weather']} (ReadOnly -> replayed)"
+    )
+    print(
+        f"  send_alert  re-executed: {call_counts['send_alert']} (IrreversibleWrite -> SEALED)"
+    )
     assert call_counts["send_alert"] == 0, "send_alert must not re-execute on recovery"
     print("\n  PASS: alert not re-sent on recovery")
 

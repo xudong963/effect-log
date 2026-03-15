@@ -123,11 +123,14 @@ def make_tooldefs(tool_specs):
         tool, effect = spec["tool"], spec["effect"]
         fn = getattr(tool, "func", None)
         if fn is not None:
+
             def adapted(args, _fn=fn):
                 return _fn(**args)
         else:
+
             def adapted(args, _tool=tool):
                 return _tool.invoke(args)
+
         defs.append(ToolDef(tool.name, effect, adapted))
     return defs
 

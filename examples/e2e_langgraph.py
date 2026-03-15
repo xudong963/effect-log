@@ -116,8 +116,10 @@ def main():
     # 5. Show effect-log history
     print("\n=== Effect-log history ===\n")
     for entry in log.history():
-        print(f"  seq={entry['sequence']}  tool={entry['tool_name']:<15}  "
-              f"effect={entry['effect_kind']:<20}  outcome={entry['outcome']}")
+        print(
+            f"  seq={entry['sequence']}  tool={entry['tool_name']:<15}  "
+            f"effect={entry['effect_kind']:<20}  outcome={entry['outcome']}"
+        )
 
     print(f"\n  lookup_stock called: {call_counts['lookup_stock']} time(s)")
     print(f"  place_order  called: {call_counts['place_order']} time(s)")
@@ -135,9 +137,15 @@ def main():
     for entry in log.history():
         log2.execute(entry["tool_name"], {})
 
-    print(f"  lookup_stock re-executed: {call_counts['lookup_stock']} (ReadOnly -> replayed)")
-    print(f"  place_order  re-executed: {call_counts['place_order']} (IrreversibleWrite -> SEALED)")
-    assert call_counts["place_order"] == 0, "place_order must not re-execute on recovery"
+    print(
+        f"  lookup_stock re-executed: {call_counts['lookup_stock']} (ReadOnly -> replayed)"
+    )
+    print(
+        f"  place_order  re-executed: {call_counts['place_order']} (IrreversibleWrite -> SEALED)"
+    )
+    assert call_counts["place_order"] == 0, (
+        "place_order must not re-execute on recovery"
+    )
     print("\n  PASS: order not re-placed on recovery")
 
 

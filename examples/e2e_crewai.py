@@ -99,8 +99,10 @@ def main():
     # 6. Show effect-log history
     print("=== Effect-log history ===\n")
     for entry in log.history():
-        print(f"  seq={entry['sequence']}  tool={entry['tool_name']:<15}  "
-              f"effect={entry['effect_kind']:<20}  outcome={entry['outcome']}")
+        print(
+            f"  seq={entry['sequence']}  tool={entry['tool_name']:<15}  "
+            f"effect={entry['effect_kind']:<20}  outcome={entry['outcome']}"
+        )
 
     print(f"\n  web_search  called: {call_counts['web_search']} time(s)")
     print(f"  send_report called: {call_counts['send_report']} time(s)")
@@ -119,9 +121,15 @@ def main():
     for entry in log.history():
         log2.execute(entry["tool_name"], {})
 
-    print(f"  web_search  re-executed: {call_counts['web_search']} (ReadOnly -> replayed)")
-    print(f"  send_report re-executed: {call_counts['send_report']} (IrreversibleWrite -> SEALED)")
-    assert call_counts["send_report"] == 0, "send_report must not re-execute on recovery"
+    print(
+        f"  web_search  re-executed: {call_counts['web_search']} (ReadOnly -> replayed)"
+    )
+    print(
+        f"  send_report re-executed: {call_counts['send_report']} (IrreversibleWrite -> SEALED)"
+    )
+    assert call_counts["send_report"] == 0, (
+        "send_report must not re-execute on recovery"
+    )
     print("\n  PASS: report not re-sent on recovery")
 
 
