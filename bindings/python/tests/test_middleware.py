@@ -306,8 +306,8 @@ class TestOpenAIAgentsMiddleware:
         assert wrapped.name == "search"
         assert wrapped.description == "Search the web"
 
-    @pytest.mark.asyncio
-    async def test_wrapped_tool_invocation(self):
+    def test_wrapped_tool_invocation(self):
+        import asyncio
         from effect_log.middleware.openai_agents import wrap_function_tool
 
         tools, counts = make_tools()
@@ -321,7 +321,9 @@ class TestOpenAIAgentsMiddleware:
         )
 
         wrapped = wrap_function_tool(log, original)
-        result = await wrapped.on_invoke_tool(None, '{"query": "test"}')
+        result = asyncio.get_event_loop().run_until_complete(
+            wrapped.on_invoke_tool(None, '{"query": "test"}')
+        )
 
         parsed = json.loads(result)
         assert "results" in parsed
@@ -731,3 +733,165 @@ class TestPydanticAIMiddleware:
         assert counts2["send_email"] == 0
         # Same result
         assert result1 == result2
+
+
+# ── Anthropic Claude API Middleware Tests ─────────────────────────────────────
+
+
+def _mock_anthropic():
+    """Install mock anthropic module."""
+    anthropic_mod = types.ModuleType("anthropic")
+    sys.modules["anthropic"] = anthropic_mod
+    return anthropic_mod
+
+
+class TestAnthropicMiddleware:
+    def setup_method(self):
+        self.anthropic_mod = _mock_anthropic()
+
+    def teardown_method(self):
+        sys.modules.pop("anthropic", None)
+        sys.modules.pop("effect_log.middleware.anthropic", None)
+
+    def test_make_tooldefs(self):
+        """make_tooldefs creates ToolDefs from raw functions."""
+        from effect_log.middleware.anthropic import make_tooldefs
+
+        call_log = []
+
+        def search_db(query: str = "") -> str:
+            call_log.append(("search", query))
+            return f"results for {query}"
+
+        def send_email(to: str = "", subject: str = "") -> str:
+            call_log.append(("email", to))
+            return f"sent to {to}"
+
+        defs = make_tooldefs(
+            [
+                {"func": search_db, "effect": EffectKind.ReadOnly},
+                {"func": send_email, "effect": EffectKind.IrreversibleWrite},
+            ]
+        )
+
+        assert len(defs) == 2
+        log = make_log(defs)
+        log.execute("search_db", {"query": "revenue"})
+        assert call_log == [("search", "revenue")]
+
+        log.execute("send_email", {"to": "ceo@co.com", "subject": "Report"})
+        assert call_log == [("search", "revenue"), ("email", "ceo@co.com")]
+
+    def test_executor_normal_execution(self):
+        """Executor routes tool calls through effect-log."""
+        from effect_log.middleware.anthropic import effect_logged_tool_executor
+
+        tools, counts = make_tools()
+        log = make_log(tools)
+
+        tool_map = {"search": lambda **kw: None, "send_email": lambda **kw: None}
+        executor = effect_logged_tool_executor(log, tool_map)
+
+        result = executor("search", {"query": "test"}, "call-001")
+        assert result["type"] == "tool_result"
+        assert result["tool_use_id"] == "call-001"
+        assert "is_error" not in result
+        parsed = json.loads(result["content"])
+        assert "results" in parsed
+        assert counts["search"] == 1
+
+    def test_executor_unknown_tool(self):
+        """Executor returns error for unknown tools."""
+        from effect_log.middleware.anthropic import effect_logged_tool_executor
+
+        tools, counts = make_tools()
+        log = make_log(tools)
+
+        executor = effect_logged_tool_executor(log, {"search": lambda **kw: None})
+
+        result = executor("nonexistent", {"query": "test"}, "call-002")
+        assert result["is_error"] is True
+        assert "Unknown tool" in result["content"]
+
+    def test_executor_irreversible_write(self):
+        """Executor handles IrreversibleWrite tools."""
+        from effect_log.middleware.anthropic import effect_logged_tool_executor
+
+        tools, counts = make_tools()
+        log = make_log(tools)
+
+        tool_map = {"send_email": lambda **kw: None}
+        executor = effect_logged_tool_executor(log, tool_map)
+
+        result = executor("send_email", {"to": "ceo@co.com"}, "call-003")
+        assert "is_error" not in result
+        parsed = json.loads(result["content"])
+        assert parsed["sent"] is True
+        assert counts["send_email"] == 1
+
+    def test_process_tool_calls(self):
+        """process_tool_calls handles a full response."""
+        from effect_log.middleware.anthropic import process_tool_calls
+
+        tools, counts = make_tools()
+        log = make_log(tools)
+
+        tool_map = {"search": lambda **kw: None, "send_email": lambda **kw: None}
+
+        # Mock a Claude response with tool_use blocks
+        block1 = MagicMock()
+        block1.type = "tool_use"
+        block1.name = "search"
+        block1.input = {"query": "revenue"}
+        block1.id = "tu_001"
+
+        block2 = MagicMock()
+        block2.type = "tool_use"
+        block2.name = "send_email"
+        block2.input = {"to": "ceo@co.com"}
+        block2.id = "tu_002"
+
+        text_block = MagicMock()
+        text_block.type = "text"
+
+        response = MagicMock()
+        response.content = [block1, text_block, block2]
+
+        results = process_tool_calls(log, tool_map, response)
+        assert len(results) == 2
+        assert results[0]["tool_use_id"] == "tu_001"
+        assert results[1]["tool_use_id"] == "tu_002"
+        assert counts["search"] == 1
+        assert counts["send_email"] == 1
+
+    def test_recovery_through_anthropic(self):
+        """Verify sealed results work through the Anthropic middleware."""
+        import tempfile, os
+        from effect_log.middleware.anthropic import effect_logged_tool_executor
+
+        tmpdir = tempfile.mkdtemp()
+        db = f"sqlite:///{os.path.join(tmpdir, 'test.db')}"
+
+        tools, counts1 = make_tools()
+        log = make_log(tools, storage=db)
+
+        tool_map = {"send_email": lambda **kw: None}
+        executor = effect_logged_tool_executor(log, tool_map)
+
+        # First execution
+        result1 = executor("send_email", {"to": "ceo@co.com"}, "call-001")
+        assert counts1["send_email"] == 1
+
+        # Recovery
+        tools2, counts2 = make_tools()
+        log2 = EffectLog(
+            execution_id="test-mw-001", tools=tools2, storage=db, recover=True
+        )
+
+        executor2 = effect_logged_tool_executor(log2, tool_map)
+        result2 = executor2("send_email", {"to": "ceo@co.com"}, "call-001")
+
+        # Sealed — not re-executed
+        assert counts2["send_email"] == 0
+        # Same content
+        assert result1["content"] == result2["content"]
