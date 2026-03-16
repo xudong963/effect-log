@@ -56,6 +56,7 @@ Built-in middleware for major agent frameworks:
 | **CrewAI** | `effect_log.middleware.crewai` | `effect_logged_crew`, `effect_logged_tool` |
 | **Pydantic AI** | `effect_log.middleware.pydantic_ai` | `effect_logged_agent`, `EffectLogToolset` |
 | **Anthropic Claude API** | `effect_log.middleware.anthropic` | `effect_logged_tool_executor`, `process_tool_calls` |
+| **Bub** | `effect_log.middleware.bub` | `effect_logged_registry`, `effect_logged_tool` |
 
 See [`examples/`](examples/) for runnable demos:
 
@@ -65,6 +66,7 @@ See [`examples/`](examples/) for runnable demos:
 - [`crewai_integration.py`](examples/crewai_integration.py) — CrewAI tool + crew wrapping
 - [`pydantic_ai_integration.py`](examples/pydantic_ai_integration.py) — Pydantic AI toolset wrapping
 - [`anthropic_integration.py`](examples/anthropic_integration.py) — Anthropic Claude API tool_use
+- [`e2e_bub.py`](examples/e2e_bub.py) — Bub agent crash recovery for bash/file tools
 
 ## How It Works
 
@@ -94,6 +96,7 @@ pytest tests/ -v
 - [x] Core library — WAL engine, recovery engine, SQLite + in-memory backends
 - [x] Python bindings — PyO3 + maturin
 - [x] Framework middleware — LangGraph, OpenAI Agents SDK, CrewAI, Pydantic AI, Anthropic Claude API
+- [x] Framework middleware — LangGraph, OpenAI Agents SDK, CrewAI, Pydantic AI, Bub
 - [ ] TypeScript bindings — napi-rs, Vercel AI SDK
 - [ ] Additional backends — RocksDB, S3, Restate journal
 - [ ] Auto-classification — infer effect kind from HTTP methods / API metadata
