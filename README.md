@@ -54,6 +54,8 @@ Built-in middleware for major agent frameworks:
 | **LangGraph** | `effect_log.middleware.langgraph` | `EffectLogToolNode`, `effect_logged_tools` |
 | **OpenAI Agents SDK** | `effect_log.middleware.openai_agents` | `effect_logged_agent`, `wrap_function_tool` |
 | **CrewAI** | `effect_log.middleware.crewai` | `effect_logged_crew`, `effect_logged_tool` |
+| **Pydantic AI** | `effect_log.middleware.pydantic_ai` | `effect_logged_agent`, `EffectLogToolset` |
+| **Anthropic Claude API** | `effect_log.middleware.anthropic` | `effect_logged_tool_executor`, `process_tool_calls` |
 
 See [`examples/`](examples/) for runnable demos:
 
@@ -61,6 +63,8 @@ See [`examples/`](examples/) for runnable demos:
 - [`langgraph_integration.py`](examples/langgraph_integration.py) — LangGraph ToolNode + tool wrapping
 - [`openai_agents_integration.py`](examples/openai_agents_integration.py) — OpenAI Agents SDK wrapping
 - [`crewai_integration.py`](examples/crewai_integration.py) — CrewAI tool + crew wrapping
+- [`pydantic_ai_integration.py`](examples/pydantic_ai_integration.py) — Pydantic AI toolset wrapping
+- [`anthropic_integration.py`](examples/anthropic_integration.py) — Anthropic Claude API tool_use
 
 ## How It Works
 
@@ -89,7 +93,7 @@ pytest tests/ -v
 
 - [x] Core library — WAL engine, recovery engine, SQLite + in-memory backends
 - [x] Python bindings — PyO3 + maturin
-- [x] Framework middleware — LangGraph, OpenAI Agents SDK, CrewAI
+- [x] Framework middleware — LangGraph, OpenAI Agents SDK, CrewAI, Pydantic AI, Anthropic Claude API
 - [ ] TypeScript bindings — napi-rs, Vercel AI SDK
 - [ ] Additional backends — RocksDB, S3, Restate journal
 - [ ] Auto-classification — infer effect kind from HTTP methods / API metadata

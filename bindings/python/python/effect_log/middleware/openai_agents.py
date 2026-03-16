@@ -86,8 +86,6 @@ def wrap_function_tool(log: Any, tool: Any, effect_kind: Any = None) -> Any:
     _ensure_openai_agents()
     from agents import FunctionTool
 
-    original_invoke = tool.on_invoke_tool
-
     async def effect_logged_invoke(ctx, args_json: str) -> Any:
         tool_name = tool.name
         try:
@@ -95,14 +93,10 @@ def wrap_function_tool(log: Any, tool: Any, effect_kind: Any = None) -> Any:
         except (json.JSONDecodeError, TypeError):
             args = {"raw_input": str(args_json)}
 
-        try:
-            result = log.execute(
-                tool_name, args if isinstance(args, dict) else {"input": args}
-            )
-            return json.dumps(result) if not isinstance(result, str) else result
-        except Exception:
-            # Fall back to original if effect-log fails (e.g., tool not registered)
-            return await original_invoke(ctx, args_json)
+        result = log.execute(
+            tool_name, args if isinstance(args, dict) else {"input": args}
+        )
+        return json.dumps(result) if not isinstance(result, str) else result
 
     return FunctionTool(
         name=tool.name,
