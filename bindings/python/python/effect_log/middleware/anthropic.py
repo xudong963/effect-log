@@ -9,11 +9,14 @@ Usage:
     from effect_log import EffectLog, EffectKind, ToolDef
     from effect_log.middleware.anthropic import effect_logged_tool_executor, make_tooldefs
 
-    tool_specs = [
+    # With auto-classification (just pass functions):
+    tools = make_tooldefs([search_db, send_email])
+
+    # Or with explicit effects:
+    tools = make_tooldefs([
         {"func": search_db, "effect": EffectKind.ReadOnly},
         {"func": send_email, "effect": EffectKind.IrreversibleWrite},
-    ]
-    tools = make_tooldefs(tool_specs)
+    ])
     log = EffectLog(execution_id="task-001", tools=tools, storage="sqlite:///effects.db")
 
     executor = effect_logged_tool_executor(log, {
@@ -46,22 +49,31 @@ def _ensure_anthropic():
 def make_tooldefs(tool_specs):
     """Create ToolDef entries from raw functions for Anthropic tool_use.
 
-    Anthropic's tool_use pattern uses raw functions, so this helper takes
-    the same functions and produces EffectLog ToolDefs.
+    Accepts raw callables (auto-classified) or dicts with explicit effects.
 
     Args:
-        tool_specs: List of dicts with keys:
-            - "func": A raw callable
-            - "effect": The EffectKind for this tool
+        tool_specs: List of:
+            - callables (auto-classified), or
+            - dicts with keys "func" and optional "effect" (EffectKind)
 
     Returns:
         List of ToolDef instances ready for EffectLog construction.
     """
     from effect_log import ToolDef
+    from effect_log.classify import classify_effect_kind
 
     defs = []
     for spec in tool_specs:
-        fn, effect = spec["func"], spec["effect"]
+        if callable(spec):
+            fn, effect = spec, None
+        elif isinstance(spec, dict):
+            fn = spec["func"]
+            effect = spec.get("effect")
+        else:
+            raise TypeError(f"Expected callable or dict, got {type(spec).__name__}")
+
+        if effect is None:
+            effect = classify_effect_kind(fn).effect_kind
 
         def adapted(args, _fn=fn):
             return _fn(**args)

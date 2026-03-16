@@ -9,7 +9,8 @@ Usage:
 
     log = EffectLog(execution_id="task-001", tools=tools, storage="sqlite:///effects.db")
 
-    # Option 1: Wrap existing LangChain tools
+    # Option 1: Wrap existing LangChain tools (auto-classified or explicit)
+    wrapped = effect_logged_tools(log, [search_tool, send_email_tool])
     wrapped = effect_logged_tools(log, [
         {"tool": search_tool, "effect": EffectKind.ReadOnly},
         {"tool": send_email_tool, "effect": EffectKind.IrreversibleWrite},
@@ -79,15 +80,17 @@ class EffectLoggedTool:
 
 def effect_logged_tools(
     log: EffectLog,
-    tool_specs: Sequence[dict[str, Any]],
+    tool_specs: Sequence[Any],
 ) -> list[EffectLoggedTool]:
     """Wrap a list of LangChain tools with effect-log tracking.
 
+    Accepts raw LangChain tools (auto-classified) or dicts with explicit effects.
+
     Args:
         log: An initialized EffectLog instance (tools must already be registered).
-        tool_specs: List of dicts with keys:
-            - "tool": A LangChain BaseTool or @tool-decorated function
-            - "effect": The EffectKind for this tool
+        tool_specs: List of:
+            - LangChain BaseTool instances (auto-classified by name), or
+            - dicts with keys "tool" and optional "effect" (EffectKind)
 
     Returns:
         List of EffectLoggedTool wrappers compatible with LangGraph's ToolNode.
@@ -95,8 +98,18 @@ def effect_logged_tools(
     _ensure_langgraph()
     wrapped = []
     for spec in tool_specs:
-        tool = spec["tool"]
-        effect = spec["effect"]
+        if isinstance(spec, dict):
+            tool = spec["tool"]
+            effect = spec.get("effect")
+        else:
+            tool = spec
+            effect = None
+
+        if effect is None:
+            from effect_log.classify import classify_from_name
+
+            effect = classify_from_name(tool.name).effect_kind
+
         wrapped.append(EffectLoggedTool(log, tool, effect_kind_name=str(effect)))
     return wrapped
 
@@ -104,23 +117,31 @@ def effect_logged_tools(
 def make_tooldefs(tool_specs):
     """Create ToolDef entries from LangChain SDK tool objects.
 
-    Eliminates the need to define tool functions twice — once for the SDK
-    and once for EffectLog. Handles both custom @tool functions (which have
-    a .func attribute) and pre-built tools (which use .invoke()).
+    Accepts raw LangChain tools (auto-classified) or dicts with explicit effects.
 
     Args:
-        tool_specs: List of dicts with keys:
-            - "tool": A LangChain BaseTool or @tool-decorated function
-            - "effect": The EffectKind for this tool
+        tool_specs: List of:
+            - LangChain BaseTool instances (auto-classified by name), or
+            - dicts with keys "tool" and optional "effect" (EffectKind)
 
     Returns:
         List of ToolDef instances ready for EffectLog construction.
     """
     from effect_log import ToolDef
+    from effect_log.classify import classify_from_name
 
     defs = []
     for spec in tool_specs:
-        tool, effect = spec["tool"], spec["effect"]
+        if isinstance(spec, dict):
+            tool = spec["tool"]
+            effect = spec.get("effect")
+        else:
+            tool = spec
+            effect = None
+
+        if effect is None:
+            effect = classify_from_name(tool.name).effect_kind
+
         fn = getattr(tool, "func", None)
         if fn is not None:
 

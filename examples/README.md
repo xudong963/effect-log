@@ -41,6 +41,10 @@ python examples/anthropic_integration.py
 | `pydantic_ai_integration.py` | Standalone demo with Pydantic AI-style tools (`search_db`, `send_email`, `upsert_record`). |
 | `anthropic_integration.py` | Standalone demo with Anthropic Claude-style tools (`search_db`, `send_email`, `upsert_record`). |
 
+> **Note:** All standalone examples use explicit `ToolDef` for clarity. In your own code, you
+> can pass raw callables directly to `EffectLog` — effect kinds are auto-classified from
+> function names, docstrings, and parameters. See the main [README](../README.md) for details.
+
 ## End-to-end examples (real SDK integration)
 
 These examples import the real SDKs and use the effect-log middleware wrappers.
@@ -89,3 +93,20 @@ python examples/e2e_bub.py
 Each e2e example also demonstrates recovery at the end: after the agent finishes,
 it replays the same calls with `recover=True` and asserts that `IrreversibleWrite`
 tools are **not** re-executed.
+
+## Auto-classification
+
+All middleware `make_tooldefs()` / `make_tools()` functions now accept raw callables:
+
+```python
+from effect_log.middleware.anthropic import make_tooldefs
+
+# Just pass functions — effect kinds are auto-classified
+tools = make_tooldefs([search_db, send_email])
+
+# Or mix raw callables with explicit specs
+tools = make_tooldefs([
+    search_db,                                                  # auto-classified
+    {"func": process_order, "effect": EffectKind.IdempotentWrite},  # explicit
+])
+```
