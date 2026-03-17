@@ -1,6 +1,7 @@
 """Tests for the auto-classification system."""
 
 import logging
+from unittest.mock import patch
 
 import pytest
 
@@ -11,6 +12,7 @@ from effect_log.classify import (
     classify_effect_kind,
     classify_from_name,
     classify_tools,
+    classify_with_llm,
 )
 
 
@@ -63,14 +65,15 @@ class TestNamePrefixClassification:
             ("post_to_slack", EffectKind.IrreversibleWrite),
             ("tweet_update", EffectKind.IrreversibleWrite),
             ("sms_alert", EffectKind.IrreversibleWrite),
+            # IrreversibleWrite (non-idempotent creates)
+            ("create_user", EffectKind.IrreversibleWrite),
+            ("add_item", EffectKind.IrreversibleWrite),
+            ("insert_row", EffectKind.IrreversibleWrite),
             # IdempotentWrite prefixes
-            ("create_user", EffectKind.IdempotentWrite),
-            ("add_item", EffectKind.IdempotentWrite),
             ("upsert_record", EffectKind.IdempotentWrite),
             ("update_profile", EffectKind.IdempotentWrite),
             ("put_object", EffectKind.IdempotentWrite),
             ("save_document", EffectKind.IdempotentWrite),
-            ("insert_row", EffectKind.IdempotentWrite),
             ("set_config", EffectKind.IdempotentWrite),
             ("write_file", EffectKind.IdempotentWrite),
             ("store_data", EffectKind.IdempotentWrite),
@@ -136,11 +139,11 @@ class TestNamePrefixClassification:
             ("remove", EffectKind.IrreversibleWrite),
             ("destroy", EffectKind.IrreversibleWrite),
             ("purge", EffectKind.IrreversibleWrite),
-            ("create", EffectKind.IdempotentWrite),
+            ("create", EffectKind.IrreversibleWrite),
             ("upsert", EffectKind.IdempotentWrite),
             ("update", EffectKind.IdempotentWrite),
             ("save", EffectKind.IdempotentWrite),
-            ("insert", EffectKind.IdempotentWrite),
+            ("insert", EffectKind.IrreversibleWrite),
             ("write", EffectKind.IdempotentWrite),
             ("store", EffectKind.IdempotentWrite),
             ("upload", EffectKind.IdempotentWrite),
@@ -395,7 +398,9 @@ class TestLogging:
 
         with caplog.at_level(logging.INFO, logger="effect_log.classify"):
             classify_effect_kind(search_db)
-        assert any("search_db" in r.message and "ReadOnly" in r.message for r in caplog.records)
+        assert any(
+            "search_db" in r.message and "ReadOnly" in r.message for r in caplog.records
+        )
 
     def test_low_confidence_logs_warning(self, caplog):
         def do_something(args):
@@ -407,3 +412,122 @@ class TestLogging:
             "do_something" in r.message and "consider specifying" in r.message
             for r in caplog.records
         )
+
+
+# ── classify_with_llm ────────────────────────────────────────────────────────
+
+
+class TestClassifyWithLlm:
+    """Test LLM-based classification (mocked — no real API calls)."""
+
+    def _make_func(self):
+        def send_report(to, subject):
+            """Send a report via email."""
+            pass
+
+        return send_report
+
+    def test_requires_opt_in(self):
+        """Raises without EFFECT_LOG_LLM_CLASSIFY=1 or explicit provider."""
+        with pytest.raises(RuntimeError, match="EFFECT_LOG_LLM_CLASSIFY"):
+            classify_with_llm(self._make_func())
+
+    @patch("effect_log.classify._call_anthropic", return_value="IrreversibleWrite")
+    def test_anthropic_provider(self, mock_call):
+        result = classify_with_llm(
+            self._make_func(), provider="anthropic", model="test-model"
+        )
+        assert result.effect_kind == EffectKind.IrreversibleWrite
+        assert result.confidence == 0.80
+        assert result.source == "llm"
+        assert "IrreversibleWrite" in result.reason
+        mock_call.assert_called_once()
+        assert mock_call.call_args[0][1] == "test-model"
+
+    @patch("effect_log.classify._call_openai", return_value="ReadOnly")
+    def test_openai_provider(self, mock_call):
+        result = classify_with_llm(
+            self._make_func(), provider="openai", model="gpt-4o-mini"
+        )
+        assert result.effect_kind == EffectKind.ReadOnly
+        assert result.confidence == 0.80
+        mock_call.assert_called_once()
+
+    @patch("effect_log.classify._call_anthropic", return_value="IdempotentWrite")
+    def test_auto_detect_anthropic(self, mock_call):
+        """Auto-detect tries anthropic first."""
+        result = classify_with_llm(self._make_func(), provider="anthropic")
+        assert result.effect_kind == EffectKind.IdempotentWrite
+
+    @patch(
+        "effect_log.classify._call_anthropic",
+        side_effect=ImportError("no anthropic"),
+    )
+    @patch("effect_log.classify._call_openai", return_value="ReadThenWrite")
+    def test_auto_detect_falls_back_to_openai(self, mock_openai, mock_anthropic):
+        """Auto-detect falls back to openai when anthropic not installed."""
+        with patch.dict("os.environ", {"EFFECT_LOG_LLM_CLASSIFY": "1"}):
+            result = classify_with_llm(self._make_func())
+        assert result.effect_kind == EffectKind.ReadThenWrite
+        mock_anthropic.assert_called_once()
+        mock_openai.assert_called_once()
+
+    @patch(
+        "effect_log.classify._call_anthropic",
+        side_effect=ImportError("no anthropic"),
+    )
+    @patch(
+        "effect_log.classify._call_openai",
+        side_effect=ImportError("no openai"),
+    )
+    def test_auto_detect_no_sdk_raises(self, mock_openai, mock_anthropic):
+        """Raises ImportError when neither SDK is available."""
+        with patch.dict("os.environ", {"EFFECT_LOG_LLM_CLASSIFY": "1"}):
+            with pytest.raises(ImportError, match="anthropic or openai"):
+                classify_with_llm(self._make_func())
+
+    @patch("effect_log.classify._call_anthropic", return_value="Compensatable")
+    def test_compensatable_downgraded(self, mock_call):
+        """Compensatable is safety-downgraded to IrreversibleWrite."""
+        result = classify_with_llm(self._make_func(), provider="anthropic")
+        assert result.effect_kind == EffectKind.IrreversibleWrite
+        assert result.confidence == 0.80
+
+    @patch("effect_log.classify._call_anthropic", return_value="garbage_response")
+    def test_unknown_response_defaults_to_irreversible(self, mock_call):
+        """Unrecognized LLM output defaults to IrreversibleWrite with 0 confidence."""
+        result = classify_with_llm(self._make_func(), provider="anthropic")
+        assert result.effect_kind == EffectKind.IrreversibleWrite
+        assert result.confidence == 0.0
+
+    @patch("effect_log.classify._call_openai", return_value="ReadOnly")
+    def test_env_model_override(self, mock_call):
+        """EFFECT_LOG_LLM_MODEL env var sets the model."""
+        with patch.dict(
+            "os.environ",
+            {"EFFECT_LOG_LLM_CLASSIFY": "1", "EFFECT_LOG_LLM_MODEL": "custom-model"},
+        ):
+            classify_with_llm(self._make_func(), provider="openai")
+        assert mock_call.call_args[0][1] == "custom-model"
+
+    @patch("effect_log.classify._call_openai", return_value="ReadOnly")
+    def test_explicit_model_overrides_env(self, mock_call):
+        """Explicit model= takes precedence over env var."""
+        with patch.dict(
+            "os.environ",
+            {"EFFECT_LOG_LLM_CLASSIFY": "1", "EFFECT_LOG_LLM_MODEL": "env-model"},
+        ):
+            classify_with_llm(
+                self._make_func(), provider="openai", model="explicit-model"
+            )
+        assert mock_call.call_args[0][1] == "explicit-model"
+
+    @patch("effect_log.classify._call_anthropic", return_value="ReadOnly")
+    def test_env_provider(self, mock_call):
+        """EFFECT_LOG_LLM_PROVIDER env var selects the provider."""
+        with patch.dict(
+            "os.environ",
+            {"EFFECT_LOG_LLM_CLASSIFY": "1", "EFFECT_LOG_LLM_PROVIDER": "anthropic"},
+        ):
+            classify_with_llm(self._make_func())
+        mock_call.assert_called_once()

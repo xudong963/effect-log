@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Callable, Sequence
@@ -59,14 +60,15 @@ _PREFIX_MAP: list[tuple[str, EffectKind]] = [
     ("post_to_", EffectKind.IrreversibleWrite),
     ("tweet_", EffectKind.IrreversibleWrite),
     ("sms_", EffectKind.IrreversibleWrite),
+    # IrreversibleWrite (non-idempotent creates)
+    ("create_", EffectKind.IrreversibleWrite),
+    ("add_", EffectKind.IrreversibleWrite),
+    ("insert_", EffectKind.IrreversibleWrite),
     # IdempotentWrite
-    ("create_", EffectKind.IdempotentWrite),
-    ("add_", EffectKind.IdempotentWrite),
     ("upsert_", EffectKind.IdempotentWrite),
     ("update_", EffectKind.IdempotentWrite),
     ("put_", EffectKind.IdempotentWrite),
     ("save_", EffectKind.IdempotentWrite),
-    ("insert_", EffectKind.IdempotentWrite),
     ("set_", EffectKind.IdempotentWrite),
     ("write_", EffectKind.IdempotentWrite),
     ("store_", EffectKind.IdempotentWrite),
@@ -77,7 +79,9 @@ _PREFIX_MAP: list[tuple[str, EffectKind]] = [
     ("disable_", EffectKind.IdempotentWrite),
     ("assign_", EffectKind.IdempotentWrite),
     ("tag_", EffectKind.IdempotentWrite),
-    # Compensatable
+    # Compensatable (auto-downgraded to IrreversibleWrite since compensation
+    # functions can't be auto-detected; kept here so the downgrade message
+    # can tell users to provide compensate= to unlock Compensatable)
     ("reserve_", EffectKind.Compensatable),
     ("lock_", EffectKind.Compensatable),
     ("allocate_", EffectKind.Compensatable),
@@ -124,11 +128,11 @@ _EXACT_NAME_MAP: dict[str, EffectKind] = {
     "remove": EffectKind.IrreversibleWrite,
     "destroy": EffectKind.IrreversibleWrite,
     "purge": EffectKind.IrreversibleWrite,
-    "create": EffectKind.IdempotentWrite,
+    "create": EffectKind.IrreversibleWrite,
     "upsert": EffectKind.IdempotentWrite,
     "update": EffectKind.IdempotentWrite,
     "save": EffectKind.IdempotentWrite,
-    "insert": EffectKind.IdempotentWrite,
+    "insert": EffectKind.IrreversibleWrite,
     "write": EffectKind.IdempotentWrite,
     "store": EffectKind.IdempotentWrite,
     "upload": EffectKind.IdempotentWrite,
@@ -159,7 +163,6 @@ _DOCSTRING_KEYWORDS: list[tuple[list[str], EffectKind]] = [
             "returns data",
             "does not modify",
             "non-destructive",
-            "safe to retry",
         ],
         EffectKind.ReadOnly,
     ),
@@ -561,7 +564,7 @@ def classify_from_name(name: str) -> ClassificationResult:
     if name_scores:
         best_ki = max(name_scores, key=name_scores.get)
         kind = _kind_from_int(best_ki)
-        confidence = name_scores[best_ki] * _WEIGHT_NAME
+        confidence = name_scores[best_ki]
         reason = "name"
     else:
         kind = EffectKind.IrreversibleWrite
@@ -610,24 +613,96 @@ def classify_tools(funcs: Sequence[Callable]) -> ClassificationReport:
     return report
 
 
-def classify_with_llm(func: Callable) -> ClassificationResult:
-    """Classify effect kind using an LLM as fallback.
+# ── LLM classification ──────────────────────────────────────────────────────
 
-    Requires EFFECT_LOG_LLM_CLASSIFY=1 environment variable and either
-    the anthropic or openai SDK installed. Results are cached.
+_VALID_KINDS = {
+    "ReadOnly": EffectKind.ReadOnly,
+    "IdempotentWrite": EffectKind.IdempotentWrite,
+    "IrreversibleWrite": EffectKind.IrreversibleWrite,
+    "ReadThenWrite": EffectKind.ReadThenWrite,
+    "Compensatable": EffectKind.IrreversibleWrite,  # safety downgrade
+}
+
+_LLM_PROMPT_TEMPLATE = (
+    "Classify this Python function's side-effect kind.\n"
+    "Function name: {name}\n"
+    "Docstring: {doc}\n"
+    "Source:\n{source}\n\n"
+    "Classify as exactly one of: ReadOnly, IdempotentWrite, "
+    "IrreversibleWrite, ReadThenWrite\n"
+    "Respond with just the classification name."
+)
+
+
+def _call_anthropic(prompt: str, model: str) -> str:
+    """Call the Anthropic API. Raises on failure."""
+    import anthropic
+
+    client = anthropic.Anthropic()
+    response = client.messages.create(
+        model=model,
+        max_tokens=50,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.content[0].text.strip()
+
+
+def _call_openai(prompt: str, model: str) -> str:
+    """Call the OpenAI API. Raises on failure."""
+    import openai
+
+    client = openai.OpenAI()
+    response = client.chat.completions.create(
+        model=model,
+        max_tokens=50,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.choices[0].message.content.strip()
+
+
+def classify_with_llm(
+    func: Callable,
+    *,
+    model: str | None = None,
+    provider: str | None = None,
+) -> ClassificationResult:
+    """Classify effect kind using an LLM.
+
+    Sends the function name, docstring, and source code to an LLM API
+    for classification. Useful as a fallback when heuristic classification
+    has low confidence.
+
+    **Security note**: This sends function source code to an external API.
+    Do not use on functions that contain embedded secrets or sensitive logic.
+
+    Requires either the ``anthropic`` or ``openai`` SDK installed.
+    Opt-in via the ``EFFECT_LOG_LLM_CLASSIFY=1`` environment variable,
+    or pass ``provider`` explicitly.
 
     Args:
         func: The callable to classify.
+        model: Model name to use. Defaults to ``EFFECT_LOG_LLM_MODEL`` env var,
+               or ``"claude-haiku-4-5-20251001"`` (Anthropic) /
+               ``"gpt-4o-mini"`` (OpenAI).
+        provider: ``"anthropic"`` or ``"openai"``. Defaults to
+                  ``EFFECT_LOG_LLM_PROVIDER`` env var. If unset, tries
+                  Anthropic first, then OpenAI.
 
     Returns:
         ClassificationResult from LLM analysis.
-    """
-    import os
 
-    if not os.environ.get("EFFECT_LOG_LLM_CLASSIFY"):
+    Raises:
+        RuntimeError: If ``EFFECT_LOG_LLM_CLASSIFY=1`` is not set and no
+                      explicit ``provider`` is given.
+    """
+    if provider is None and not os.environ.get("EFFECT_LOG_LLM_CLASSIFY"):
         raise RuntimeError(
-            "LLM classification requires EFFECT_LOG_LLM_CLASSIFY=1 environment variable"
+            "LLM classification requires EFFECT_LOG_LLM_CLASSIFY=1 "
+            "environment variable, or pass provider= explicitly"
         )
+
+    provider = provider or os.environ.get("EFFECT_LOG_LLM_PROVIDER")
+    model_env = os.environ.get("EFFECT_LOG_LLM_MODEL")
 
     fname = getattr(func, "__name__", "unknown")
     doc = inspect.getdoc(func) or ""
@@ -636,59 +711,35 @@ def classify_with_llm(func: Callable) -> ClassificationResult:
     except (OSError, TypeError):
         source = ""
 
-    prompt = (
-        f"Classify this Python function's side-effect kind.\n"
-        f"Function name: {fname}\n"
-        f"Docstring: {doc}\n"
-        f"Source:\n{source}\n\n"
-        f"Classify as exactly one of: ReadOnly, IdempotentWrite, "
-        f"IrreversibleWrite, ReadThenWrite\n"
-        f"Respond with just the classification name."
-    )
+    prompt = _LLM_PROMPT_TEMPLATE.format(name=fname, doc=doc, source=source)
 
-    # Try anthropic first, then openai
-    try:
-        import anthropic
+    answer: str | None = None
 
-        client = anthropic.Anthropic()
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=50,
-            messages=[{"role": "user", "content": prompt}],
+    if provider == "anthropic":
+        answer = _call_anthropic(
+            prompt, model or model_env or "claude-haiku-4-5-20251001"
         )
-        answer = response.content[0].text.strip()
-    except (ImportError, Exception):
+    elif provider == "openai":
+        answer = _call_openai(prompt, model or model_env or "gpt-4o-mini")
+    else:
+        # Auto-detect: try anthropic, fall back to openai
         try:
-            import openai
-
-            client = openai.OpenAI()
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                max_tokens=50,
-                messages=[{"role": "user", "content": prompt}],
+            answer = _call_anthropic(
+                prompt, model or model_env or "claude-haiku-4-5-20251001"
             )
-            answer = response.choices[0].message.content.strip()
-        except (ImportError, Exception) as e:
-            logger.warning("LLM classification failed for %s: %s", fname, e)
-            return ClassificationResult(
-                effect_kind=EffectKind.IrreversibleWrite,
-                confidence=0.0,
-                reason="llm failed",
-                source="llm",
-            )
+        except ImportError:
+            try:
+                answer = _call_openai(prompt, model or model_env or "gpt-4o-mini")
+            except ImportError:
+                raise ImportError(
+                    "LLM classification requires either the anthropic or openai SDK. "
+                    "Install with: pip install anthropic  or  pip install openai"
+                )
 
-    kind_map = {
-        "ReadOnly": EffectKind.ReadOnly,
-        "IdempotentWrite": EffectKind.IdempotentWrite,
-        "IrreversibleWrite": EffectKind.IrreversibleWrite,
-        "ReadThenWrite": EffectKind.ReadThenWrite,
-        "Compensatable": EffectKind.IrreversibleWrite,  # safety downgrade
-    }
+    kind = _VALID_KINDS.get(answer, EffectKind.IrreversibleWrite)
+    confidence = 0.80 if answer in _VALID_KINDS else 0.0
 
-    kind = kind_map.get(answer, EffectKind.IrreversibleWrite)
-    confidence = 0.80 if answer in kind_map else 0.0
-
-    logger.info("%s -> %s (%.2f, llm)", fname, _kind_name(kind), confidence)
+    logger.info("%s -> %s (%.2f, llm: %s)", fname, _kind_name(kind), confidence, answer)
 
     return ClassificationResult(
         effect_kind=kind,

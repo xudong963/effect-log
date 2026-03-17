@@ -1,6 +1,5 @@
 """Basic tests for the effect-log Python bindings."""
 
-import json
 import tempfile
 import os
 
@@ -83,6 +82,19 @@ def test_tool_decorator_auto_classify():
     assert result["results"] == ["a", "b"]
 
 
+def test_tool_decorator_no_parens():
+    """The @tool decorator without parens auto-classifies."""
+
+    @tool
+    def search_db(args):
+        return {"results": ["a", "b"]}
+
+    assert isinstance(search_db, ToolDef)
+    log = EffectLog(execution_id="test-no-parens", tools=[search_db])
+    result = log.execute("search_db", {})
+    assert result["results"] == ["a", "b"]
+
+
 def test_auto_tool_decorator():
     """The @auto_tool decorator auto-classifies."""
 
@@ -130,11 +142,6 @@ def test_recovery_sealed_irreversible():
         result = log2.execute("send_email", {"to": "ceo@co.com"})
         assert result["sent_to"] == "ceo@co.com"
         assert call_count2["n"] == 0  # NOT re-executed
-
-
-def test_human_review_on_crash():
-    """Crashed IrreversibleWrite escalates to human review."""
-    pass
 
 
 # ── Auto-classification integration tests ────────────────────────────────────

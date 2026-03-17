@@ -9,7 +9,6 @@ import sys
 import types
 from unittest.mock import MagicMock, AsyncMock
 
-import pytest
 
 from effect_log import EffectKind, EffectLog, ToolDef
 
@@ -187,7 +186,7 @@ class TestLangGraphMiddleware:
         assert len(defs) == 1
 
         log = make_log(defs)
-        result = log.execute("search", {"query": "python"})
+        log.execute("search", {"query": "python"})
         assert call_log == [("search", "python")]
 
     def test_make_tooldefs_without_func(self):
@@ -201,13 +200,14 @@ class TestLangGraphMiddleware:
 
         defs = make_tooldefs([{"tool": mock_tool, "effect": EffectKind.ReadOnly}])
         log = make_log(defs)
-        result = log.execute("tavily_search", {"query": "test"})
+        log.execute("tavily_search", {"query": "test"})
 
         mock_tool.invoke.assert_called_once_with({"query": "test"})
 
     def test_recovery_through_langgraph(self):
         """Verify sealed results work through the LangGraph middleware."""
-        import tempfile, os
+        import tempfile
+        import os
         from effect_log.middleware.langgraph import effect_logged_tools
 
         tmpdir = tempfile.mkdtemp()
@@ -516,7 +516,8 @@ class TestCrewAIMiddleware:
 
     def test_recovery_through_crewai(self):
         """Verify sealed results work through the CrewAI middleware."""
-        import tempfile, os
+        import tempfile
+        import os
         from effect_log.middleware.crewai import effect_logged_tool
 
         tmpdir = tempfile.mkdtemp()
@@ -698,7 +699,8 @@ class TestPydanticAIMiddleware:
 
     def test_recovery_through_pydantic_ai(self):
         """Verify sealed results work through the pydantic-ai middleware."""
-        import tempfile, os
+        import tempfile
+        import os
         from effect_log.middleware.pydantic_ai import EffectLogToolset
 
         tmpdir = tempfile.mkdtemp()
@@ -708,9 +710,7 @@ class TestPydanticAIMiddleware:
         log = make_log(tools, storage=db)
 
         mock_inner = MagicMock()
-        wrapper = EffectLogToolset(
-            log, mock_inner, {"send_email": EffectKind.IrreversibleWrite}
-        )
+        EffectLogToolset(log, mock_inner, {"send_email": EffectKind.IrreversibleWrite})
 
         # First execution — goes through WAL synchronously
         result1 = log.execute("send_email", {"to": "ceo@co.com"})
@@ -723,7 +723,7 @@ class TestPydanticAIMiddleware:
         )
 
         mock_inner2 = MagicMock()
-        wrapper2 = EffectLogToolset(
+        EffectLogToolset(
             log2, mock_inner2, {"send_email": EffectKind.IrreversibleWrite}
         )
 
@@ -866,7 +866,8 @@ class TestAnthropicMiddleware:
 
     def test_recovery_through_anthropic(self):
         """Verify sealed results work through the Anthropic middleware."""
-        import tempfile, os
+        import tempfile
+        import os
         from effect_log.middleware.anthropic import effect_logged_tool_executor
 
         tmpdir = tempfile.mkdtemp()
@@ -946,10 +947,12 @@ class TestAnthropicAutoClassify:
             return f"processed {order_id}"
 
         # Mix of raw callable and dict with explicit effect
-        defs = make_tooldefs([
-            search_db,
-            {"func": process_order, "effect": EffectKind.IdempotentWrite},
-        ])
+        defs = make_tooldefs(
+            [
+                search_db,
+                {"func": process_order, "effect": EffectKind.IdempotentWrite},
+            ]
+        )
 
         assert len(defs) == 2
         log = make_log(defs)
@@ -1083,10 +1086,12 @@ class TestOpenAIAgentsAutoClassify:
             call_log.append(("order", order_id))
             return f"processed {order_id}"
 
-        sdk_tools, tooldefs = oa_make_tools([
-            get_weather,
-            {"func": process_order, "effect": EffectKind.IdempotentWrite},
-        ])
+        sdk_tools, tooldefs = oa_make_tools(
+            [
+                get_weather,
+                {"func": process_order, "effect": EffectKind.IdempotentWrite},
+            ]
+        )
 
         log = make_log(tooldefs)
         log.execute("get_weather", {"city": "NY"})
@@ -1181,10 +1186,12 @@ class TestPydanticAIAutoClassify:
             call_log.append(("order", order_id))
             return f"processed {order_id}"
 
-        defs = make_tooldefs([
-            search_db,
-            {"func": process_order, "effect": EffectKind.IdempotentWrite},
-        ])
+        defs = make_tooldefs(
+            [
+                search_db,
+                {"func": process_order, "effect": EffectKind.IdempotentWrite},
+            ]
+        )
 
         log = make_log(defs)
         log.execute("search_db", {"query": "test"})

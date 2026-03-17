@@ -5,7 +5,12 @@ from effect_log.effect_log_native import (
     EffectLog as _NativeEffectLog,
     ToolDef,
 )
-from effect_log.classify import classify_tools, classify_effect_kind, classify_from_name
+from effect_log.classify import (
+    classify_effect_kind,
+    classify_from_name,
+    classify_tools,
+    classify_with_llm,
+)
 
 __all__ = [
     "EffectKind",
@@ -16,6 +21,7 @@ __all__ = [
     "classify_tools",
     "classify_effect_kind",
     "classify_from_name",
+    "classify_with_llm",
     "middleware",
 ]
 
@@ -77,8 +83,10 @@ class EffectLog:
         return self._inner.history()
 
 
-def tool(effect: EffectKind | None = None, compensate=None):
+def tool(effect=None, compensate=None):
     """Decorator to register a function as an effect-logged tool.
+
+    Supports both ``@tool`` (no parens) and ``@tool()`` / ``@tool(EffectKind.X)``.
 
     Args:
         effect: The EffectKind classification. If None, auto-classified.
@@ -87,6 +95,9 @@ def tool(effect: EffectKind | None = None, compensate=None):
     Returns:
         A ToolDef wrapping the function.
     """
+    # Handle @tool without parens: effect will be the decorated function
+    if callable(effect):
+        return auto_tool(effect)
 
     def decorator(func):
         kind = effect
