@@ -95,8 +95,7 @@ pytest tests/ -v
 
 - [x] Core library — WAL engine, recovery engine, SQLite + in-memory backends
 - [x] Python bindings — PyO3 + maturin
-- [x] Framework middleware — LangGraph, OpenAI Agents SDK, CrewAI, Pydantic AI, Anthropic Claude API
-- [x] Framework middleware — LangGraph, OpenAI Agents SDK, CrewAI, Pydantic AI, Bub
+- [x] Framework middleware — LangGraph, OpenAI Agents SDK, CrewAI, Pydantic AI, Anthropic Claude API, Bub
 - [ ] TypeScript bindings — napi-rs, Vercel AI SDK
 - [ ] Additional backends — RocksDB, S3, Restate journal
 - [ ] Auto-classification — infer effect kind from HTTP methods / API metadata
