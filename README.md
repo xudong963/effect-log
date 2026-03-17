@@ -6,7 +6,7 @@ When an AI agent crashes mid-task, what happens on restart? Without effect-log, 
 
 ## The Core Idea
 
-Every tool declares its **effect kind** at registration time. This drives all recovery behavior:
+Every tool has an **effect kind** that drives all recovery behavior:
 
 | EffectKind | Recovery (completed) | Recovery (crashed) |
 |---|---|---|
@@ -18,36 +18,104 @@ Every tool declares its **effect kind** at registration time. This drives all re
 
 ## Quick Start
 
+Just pass functions — effect-log classifies them automatically:
+
+```python
+from effect_log import EffectLog
+
+log = EffectLog("task-001", tools=[search_db, send_email, upsert_record])
+log.execute("search_db", {"query": "Q4 revenue"})     # auto → ReadOnly
+log.execute("send_email", {"to": "ceo@co.com", ...})  # auto → IrreversibleWrite
+log.execute("upsert_record", {"id": "r-001", ...})    # auto → IdempotentWrite
+```
+
+Recovery — just add `recover=True`, re-run the same steps:
+
+```python
+log = EffectLog("task-001", tools=[search_db, send_email, upsert_record],
+                storage="sqlite:///effects.db", recover=True)
+log.execute("search_db", {"query": "Q4 revenue"})     # Replayed (fresh data)
+log.execute("send_email", {"to": "ceo@co.com", ...})  # Sealed — NOT re-sent
+log.execute("upsert_record", {"id": "r-001", ...})    # Replayed (idempotent)
+```
+
+### Override when needed
+
+If the classifier gets something wrong, override just that tool:
+
+```python
+from effect_log import EffectKind, EffectLog
+
+log = EffectLog("task-001",
+    tools=[search_db, send_email, process_order],
+    overrides={"process_order": EffectKind.IdempotentWrite}
+)
+```
+
+### Inspect classifications
+
+```python
+from effect_log import classify_tools
+
+report = classify_tools([search_db, send_email, process_order])
+print(report)
+# search_db      -> ReadOnly              (0.50)  name
+# send_email     -> IrreversibleWrite     (0.50)  name
+# process_order  -> IrreversibleWrite     (0.00)  default (no signals)!!!
+
+# Apply with corrections
+tools = report.apply(overrides={"process_order": EffectKind.IdempotentWrite})
+log = EffectLog("task-001", tools=tools)
+```
+
+### Explicit ToolDef still works
+
 ```python
 from effect_log import EffectKind, EffectLog, ToolDef
-
-def send_email(args):
-    return smtp.send(args["to"], args["subject"], args["body"])
 
 tools = [
     ToolDef("read_file",  EffectKind.ReadOnly,         read_file),
     ToolDef("send_email", EffectKind.IrreversibleWrite, send_email),
     ToolDef("upsert",     EffectKind.IdempotentWrite,   upsert_record),
 ]
-
 log = EffectLog(execution_id="task-001", tools=tools, storage="sqlite:///effects.db")
-log.execute("read_file",  {"path": "/tmp/report.csv"})
-log.execute("send_email", {"to": "ceo@co.com", "subject": "Report", "body": "..."})
-log.execute("upsert",     {"id": "report-001", "data": data})
 ```
 
-Recovery — just add `recover=True`, re-run the same steps:
+### Decorators
 
 ```python
-log = EffectLog(execution_id="task-001", tools=tools, storage="sqlite:///effects.db", recover=True)
-log.execute("read_file",  {"path": "/tmp/report.csv"})  # Replayed (fresh data)
-log.execute("send_email", {"to": "ceo@co.com", ...})    # Sealed — NOT re-sent
-log.execute("upsert",     {"id": "report-001", ...})    # Replayed (idempotent)
+from effect_log import tool, auto_tool
+
+@tool(effect=EffectKind.ReadOnly)       # explicit
+def read_file(args): ...
+
+@tool()                                  # auto-classified
+def search_db(args): ...
+
+@auto_tool                               # shorthand for @tool()
+def fetch_data(args): ...
 ```
+
+## Auto-Classification
+
+effect-log classifies tools using a 4-layer weighted heuristic:
+
+| Layer | Signal | Weight | Example |
+|---|---|---|---|
+| **Name prefix** | `func.__name__` matched against prefix→kind map | 0.50 | `search_` → ReadOnly |
+| **Docstring keywords** | `inspect.getdoc()` scanned for keyword families | 0.25 | "irreversible" → IrreversibleWrite |
+| **Parameter names** | `inspect.signature()` parameter names | 0.15 | `to`, `recipient` → IrreversibleWrite |
+| **Source AST** | `inspect.getsource()` for HTTP/SDK patterns | 0.10 | `requests.post()` → IrreversibleWrite |
+
+**Safety guarantees:**
+- Low confidence → defaults to `IrreversibleWrite` (never re-executes ambiguous tools)
+- Compensatable auto-downgrades to `IrreversibleWrite` (requires compensation function)
+- Explicit always wins: `overrides=`, `ToolDef(kind)`, `@tool(EffectKind.X)` bypass classification
+- All classifications logged (`effect_log.classify` logger)
 
 ## Framework Integration
 
-Built-in middleware for major agent frameworks:
+Built-in middleware for major agent frameworks. All middleware now accepts raw callables with auto-classification:
 
 | Framework | Middleware | Entry Point |
 |---|---|---|
@@ -56,7 +124,22 @@ Built-in middleware for major agent frameworks:
 | **CrewAI** | `effect_log.middleware.crewai` | `effect_logged_crew`, `effect_logged_tool` |
 | **Pydantic AI** | `effect_log.middleware.pydantic_ai` | `effect_logged_agent`, `EffectLogToolset` |
 | **Anthropic Claude API** | `effect_log.middleware.anthropic` | `effect_logged_tool_executor`, `process_tool_calls` |
-| **Bub** | `effect_log.middleware.bub` | `effect_logged_registry`, `effect_logged_tool` |
+| **Bub** | `effect_log.middleware.bub` | `EffectLoggedToolExecutor`, `effect_logged_agent` |
+
+Middleware `make_tooldefs()` / `make_tools()` now accepts raw callables alongside spec dicts:
+
+```python
+from effect_log.middleware.anthropic import make_tooldefs
+
+# Before: always needed explicit effect
+make_tooldefs([
+    {"func": search_db, "effect": EffectKind.ReadOnly},
+    {"func": send_email, "effect": EffectKind.IrreversibleWrite},
+])
+
+# After: just pass functions
+make_tooldefs([search_db, send_email])
+```
 
 See [`examples/`](examples/) for runnable demos:
 
@@ -95,11 +178,10 @@ pytest tests/ -v
 
 - [x] Core library — WAL engine, recovery engine, SQLite + in-memory backends
 - [x] Python bindings — PyO3 + maturin
-- [x] Framework middleware — LangGraph, OpenAI Agents SDK, CrewAI, Pydantic AI, Anthropic Claude API
-- [x] Framework middleware — LangGraph, OpenAI Agents SDK, CrewAI, Pydantic AI, Bub
+- [x] Framework middleware — LangGraph, OpenAI Agents SDK, CrewAI, Pydantic AI, Anthropic Claude API, Bub
+- [x] Auto-classification — infer effect kind from function name, docstring, parameters, and source AST
 - [ ] TypeScript bindings — napi-rs, Vercel AI SDK
 - [ ] Additional backends — RocksDB, S3, Restate journal
-- [ ] Auto-classification — infer effect kind from HTTP methods / API metadata
 
 ## Inspiration
 

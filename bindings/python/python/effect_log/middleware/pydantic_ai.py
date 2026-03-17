@@ -77,23 +77,31 @@ class EffectLogToolset:
 def make_tooldefs(tool_specs):
     """Create ToolDef entries from raw functions for pydantic-ai tools.
 
-    Pydantic-ai accepts raw functions directly as tools, so this helper
-    takes the same functions and produces EffectLog ToolDefs — no duplicate
-    definitions needed.
+    Accepts raw callables (auto-classified) or dicts with explicit effects.
 
     Args:
-        tool_specs: List of dicts with keys:
-            - "func": A raw callable (the same function passed to pydantic-ai)
-            - "effect": The EffectKind for this tool
+        tool_specs: List of:
+            - callables (auto-classified), or
+            - dicts with keys "func" and optional "effect" (EffectKind)
 
     Returns:
         List of ToolDef instances ready for EffectLog construction.
     """
     from effect_log import ToolDef
+    from effect_log.classify import classify_effect_kind
 
     defs = []
     for spec in tool_specs:
-        fn, effect = spec["func"], spec["effect"]
+        if callable(spec):
+            fn, effect = spec, None
+        elif isinstance(spec, dict):
+            fn = spec["func"]
+            effect = spec.get("effect")
+        else:
+            raise TypeError(f"Expected callable or dict, got {type(spec).__name__}")
+
+        if effect is None:
+            effect = classify_effect_kind(fn).effect_kind
 
         def adapted(args, _fn=fn):
             return _fn(**args)
@@ -115,7 +123,7 @@ def effect_logged_agent(
     Args:
         log: An initialized EffectLog instance.
         agent: A pydantic-ai Agent instance.
-        tool_effects: Optional dict mapping tool name → EffectKind.
+        tool_effects: Optional dict mapping tool name -> EffectKind.
                       Only tools in this mapping go through the WAL;
                       others pass through unchanged.
 

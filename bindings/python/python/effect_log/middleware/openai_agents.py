@@ -36,18 +36,12 @@ def _ensure_openai_agents():
 def make_tools(specs):
     """Create both FunctionTool and ToolDef entries from raw functions.
 
-    OpenAI's @function_tool hides the function in a closure (no .func),
-    so this helper takes raw functions *before* decoration and produces
-    both the SDK tool and the EffectLog ToolDef.
-
-    Pre-built OpenAI tools (WebSearchTool, FileSearchTool, etc.) execute
-    on OpenAI's side and cannot be effect-logged — pass them through
-    unchanged in effect_logged_agent().
+    Accepts raw callables (auto-classified) or dicts with explicit effects.
 
     Args:
-        specs: List of dicts with keys:
-            - "func": A raw callable (not yet decorated with @function_tool)
-            - "effect": The EffectKind for this tool
+        specs: List of:
+            - callables (auto-classified), or
+            - dicts with keys "func" and optional "effect" (EffectKind)
 
     Returns:
         Tuple of (list[FunctionTool], list[ToolDef]).
@@ -55,10 +49,21 @@ def make_tools(specs):
     _ensure_openai_agents()
     from agents import function_tool as ft
     from effect_log import ToolDef
+    from effect_log.classify import classify_effect_kind
 
     sdk_tools, tooldefs = [], []
     for spec in specs:
-        fn, effect = spec["func"], spec["effect"]
+        if callable(spec):
+            fn, effect = spec, None
+        elif isinstance(spec, dict):
+            fn = spec["func"]
+            effect = spec.get("effect")
+        else:
+            raise TypeError(f"Expected callable or dict, got {type(spec).__name__}")
+
+        if effect is None:
+            effect = classify_effect_kind(fn).effect_kind
+
         sdk_tools.append(ft(fn))
 
         def adapted(args, _fn=fn):
@@ -116,7 +121,7 @@ def effect_logged_agent(
     Args:
         log: An initialized EffectLog instance.
         agent: An Agent from the OpenAI Agents SDK.
-        tool_effects: Optional dict mapping tool name → EffectKind.
+        tool_effects: Optional dict mapping tool name -> EffectKind.
                       Used for documentation only; tools must already be
                       registered in the EffectLog.
 

@@ -97,13 +97,12 @@ class EffectLoggedToolExecutor:
 def make_tooldefs(tool_specs):
     """Create ToolDef entries from bub Tool classes.
 
-    Eliminates the need to define tool functions twice — once for bub and
-    once for EffectLog.
+    Accepts raw bub Tool classes (auto-classified) or dicts with explicit effects.
 
     Args:
-        tool_specs: List of dicts with keys:
-            - "tool_class": A bub Tool subclass (e.g., RunCommandTool)
-            - "effect": The EffectKind for this tool
+        tool_specs: List of:
+            - bub Tool classes (auto-classified by tool name), or
+            - dicts with keys "tool_class" and optional "effect" (EffectKind)
 
     Returns:
         List of ToolDef instances ready for EffectLog construction.
@@ -112,12 +111,22 @@ def make_tooldefs(tool_specs):
     from bub.agent.tools import Context
 
     from effect_log import ToolDef as ELToolDef
+    from effect_log.classify import classify_from_name
 
     defs = []
     for spec in tool_specs:
-        tool_class, effect = spec["tool_class"], spec["effect"]
+        if isinstance(spec, dict):
+            tool_class = spec["tool_class"]
+            effect = spec.get("effect")
+        else:
+            tool_class = spec
+            effect = None
+
         info = tool_class.get_tool_info()
         name = info["name"]
+
+        if effect is None:
+            effect = classify_from_name(name).effect_kind
 
         def adapted(args, _cls=tool_class):
             # Instantiate the tool with args, execute with a default context

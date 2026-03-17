@@ -9,7 +9,6 @@ import sys
 import types
 from unittest.mock import MagicMock, AsyncMock
 
-import pytest
 
 from effect_log import EffectKind, EffectLog, ToolDef
 
@@ -187,7 +186,7 @@ class TestLangGraphMiddleware:
         assert len(defs) == 1
 
         log = make_log(defs)
-        result = log.execute("search", {"query": "python"})
+        log.execute("search", {"query": "python"})
         assert call_log == [("search", "python")]
 
     def test_make_tooldefs_without_func(self):
@@ -201,13 +200,14 @@ class TestLangGraphMiddleware:
 
         defs = make_tooldefs([{"tool": mock_tool, "effect": EffectKind.ReadOnly}])
         log = make_log(defs)
-        result = log.execute("tavily_search", {"query": "test"})
+        log.execute("tavily_search", {"query": "test"})
 
         mock_tool.invoke.assert_called_once_with({"query": "test"})
 
     def test_recovery_through_langgraph(self):
         """Verify sealed results work through the LangGraph middleware."""
-        import tempfile, os
+        import tempfile
+        import os
         from effect_log.middleware.langgraph import effect_logged_tools
 
         tmpdir = tempfile.mkdtemp()
@@ -516,7 +516,8 @@ class TestCrewAIMiddleware:
 
     def test_recovery_through_crewai(self):
         """Verify sealed results work through the CrewAI middleware."""
-        import tempfile, os
+        import tempfile
+        import os
         from effect_log.middleware.crewai import effect_logged_tool
 
         tmpdir = tempfile.mkdtemp()
@@ -698,7 +699,8 @@ class TestPydanticAIMiddleware:
 
     def test_recovery_through_pydantic_ai(self):
         """Verify sealed results work through the pydantic-ai middleware."""
-        import tempfile, os
+        import tempfile
+        import os
         from effect_log.middleware.pydantic_ai import EffectLogToolset
 
         tmpdir = tempfile.mkdtemp()
@@ -708,9 +710,7 @@ class TestPydanticAIMiddleware:
         log = make_log(tools, storage=db)
 
         mock_inner = MagicMock()
-        wrapper = EffectLogToolset(
-            log, mock_inner, {"send_email": EffectKind.IrreversibleWrite}
-        )
+        EffectLogToolset(log, mock_inner, {"send_email": EffectKind.IrreversibleWrite})
 
         # First execution — goes through WAL synchronously
         result1 = log.execute("send_email", {"to": "ceo@co.com"})
@@ -723,7 +723,7 @@ class TestPydanticAIMiddleware:
         )
 
         mock_inner2 = MagicMock()
-        wrapper2 = EffectLogToolset(
+        EffectLogToolset(
             log2, mock_inner2, {"send_email": EffectKind.IrreversibleWrite}
         )
 
@@ -866,7 +866,8 @@ class TestAnthropicMiddleware:
 
     def test_recovery_through_anthropic(self):
         """Verify sealed results work through the Anthropic middleware."""
-        import tempfile, os
+        import tempfile
+        import os
         from effect_log.middleware.anthropic import effect_logged_tool_executor
 
         tmpdir = tempfile.mkdtemp()
@@ -895,3 +896,304 @@ class TestAnthropicMiddleware:
         assert counts2["send_email"] == 0
         # Same content
         assert result1["content"] == result2["content"]
+
+
+# ── Auto-classification middleware tests ──────────────────────────────────────
+
+
+class TestAnthropicAutoClassify:
+    """Test Anthropic middleware accepts raw callables."""
+
+    def setup_method(self):
+        self.anthropic_mod = _mock_anthropic()
+
+    def teardown_method(self):
+        sys.modules.pop("anthropic", None)
+        sys.modules.pop("effect_log.middleware.anthropic", None)
+
+    def test_make_tooldefs_raw_callables(self):
+        from effect_log.middleware.anthropic import make_tooldefs
+
+        call_log = []
+
+        def search_db(query: str = "") -> str:
+            call_log.append(("search", query))
+            return f"results for {query}"
+
+        def send_email(to: str = "") -> str:
+            call_log.append(("email", to))
+            return f"sent to {to}"
+
+        # Pass raw callables — auto-classified
+        defs = make_tooldefs([search_db, send_email])
+        assert len(defs) == 2
+
+        # Verify they work correctly through EffectLog
+        log = make_log(defs)
+        log.execute("search_db", {"query": "test"})
+        assert call_log == [("search", "test")]
+
+    def test_make_tooldefs_mixed(self):
+        from effect_log.middleware.anthropic import make_tooldefs
+
+        call_log = []
+
+        def search_db(query: str = "") -> str:
+            call_log.append(("search", query))
+            return f"results for {query}"
+
+        def process_order(order_id: str = "") -> str:
+            call_log.append(("order", order_id))
+            return f"processed {order_id}"
+
+        # Mix of raw callable and dict with explicit effect
+        defs = make_tooldefs(
+            [
+                search_db,
+                {"func": process_order, "effect": EffectKind.IdempotentWrite},
+            ]
+        )
+
+        assert len(defs) == 2
+        log = make_log(defs)
+        log.execute("search_db", {"query": "test"})
+        log.execute("process_order", {"order_id": "ORD-1"})
+        assert call_log == [("search", "test"), ("order", "ORD-1")]
+
+    def test_make_tooldefs_dict_without_effect(self):
+        from effect_log.middleware.anthropic import make_tooldefs
+
+        call_log = []
+
+        def search_db(query: str = "") -> str:
+            call_log.append(("search", query))
+            return f"results for {query}"
+
+        # Dict without effect -> auto-classified
+        defs = make_tooldefs([{"func": search_db}])
+        log = make_log(defs)
+        log.execute("search_db", {"query": "test"})
+        assert call_log == [("search", "test")]
+
+
+class TestLangGraphAutoClassify:
+    """Test LangGraph middleware accepts raw tools without explicit effects."""
+
+    def setup_method(self):
+        self.BaseTool, self.ToolMessage = _mock_langchain()
+
+    def teardown_method(self):
+        for mod in [
+            "langchain_core",
+            "langchain_core.tools",
+            "langchain_core.messages",
+        ]:
+            sys.modules.pop(mod, None)
+
+    def test_make_tooldefs_auto_classify(self):
+        from effect_log.middleware.langgraph import make_tooldefs
+
+        call_log = []
+
+        def my_search(query=""):
+            call_log.append(("search", query))
+            return f"results for {query}"
+
+        mock_tool = MagicMock()
+        mock_tool.name = "search_db"
+        mock_tool.func = my_search
+
+        # Pass without effect -> auto-classified by name
+        defs = make_tooldefs([mock_tool])
+        assert len(defs) == 1
+        log = make_log(defs)
+        log.execute("search_db", {"query": "test"})
+        assert call_log == [("search", "test")]
+
+    def test_make_tooldefs_dict_without_effect(self):
+        from effect_log.middleware.langgraph import make_tooldefs
+
+        mock_tool = MagicMock()
+        mock_tool.name = "send_email"
+        del mock_tool.func
+        mock_tool.invoke.return_value = "sent"
+
+        # Dict without explicit effect -> auto-classified
+        defs = make_tooldefs([{"tool": mock_tool}])
+        assert len(defs) == 1
+        log = make_log(defs)
+        log.execute("send_email", {"to": "test@example.com"})
+        mock_tool.invoke.assert_called_once()
+
+    def test_effect_logged_tools_auto_classify(self):
+        from effect_log.middleware.langgraph import effect_logged_tools
+
+        tools, counts = make_tools()
+        log = make_log(tools)
+
+        mock_search = MagicMock()
+        mock_search.name = "search"
+
+        # Pass tool directly without wrapping in dict
+        wrapped = effect_logged_tools(log, [mock_search])
+        assert len(wrapped) == 1
+        assert wrapped[0].name == "search"
+
+
+class TestOpenAIAgentsAutoClassify:
+    """Test OpenAI Agents middleware accepts raw callables."""
+
+    def setup_method(self):
+        self.FunctionTool = _mock_openai_agents()
+
+    def teardown_method(self):
+        sys.modules.pop("agents", None)
+
+    def test_make_tools_raw_callables(self):
+        from effect_log.middleware.openai_agents import make_tools as oa_make_tools
+
+        call_log = []
+
+        def get_weather(city: str) -> str:
+            call_log.append(("weather", city))
+            return f"sunny in {city}"
+
+        def send_alert(message: str) -> str:
+            call_log.append(("alert", message))
+            return f"sent: {message}"
+
+        # Pass raw callables — auto-classified
+        sdk_tools, tooldefs = oa_make_tools([get_weather, send_alert])
+
+        assert len(sdk_tools) == 2
+        assert len(tooldefs) == 2
+
+        log = make_log(tooldefs)
+        log.execute("get_weather", {"city": "SF"})
+        log.execute("send_alert", {"message": "hot"})
+        assert call_log == [("weather", "SF"), ("alert", "hot")]
+
+    def test_make_tools_mixed(self):
+        from effect_log.middleware.openai_agents import make_tools as oa_make_tools
+
+        call_log = []
+
+        def get_weather(city: str) -> str:
+            call_log.append(("weather", city))
+            return f"sunny in {city}"
+
+        def process_order(order_id: str) -> str:
+            call_log.append(("order", order_id))
+            return f"processed {order_id}"
+
+        sdk_tools, tooldefs = oa_make_tools(
+            [
+                get_weather,
+                {"func": process_order, "effect": EffectKind.IdempotentWrite},
+            ]
+        )
+
+        log = make_log(tooldefs)
+        log.execute("get_weather", {"city": "NY"})
+        log.execute("process_order", {"order_id": "ORD-1"})
+        assert call_log == [("weather", "NY"), ("order", "ORD-1")]
+
+
+class TestCrewAIAutoClassify:
+    """Test CrewAI middleware accepts raw tools without explicit effects."""
+
+    def setup_method(self):
+        self.BaseTool = _mock_crewai()
+
+    def teardown_method(self):
+        for mod in ["crewai", "crewai.tools"]:
+            sys.modules.pop(mod, None)
+
+    def test_make_tooldefs_auto_classify(self):
+        from effect_log.middleware.crewai import make_tooldefs
+
+        call_log = []
+
+        def my_search(query=""):
+            call_log.append(("search", query))
+            return f"results for {query}"
+
+        mock_tool = MagicMock()
+        mock_tool.name = "search_db"
+        mock_tool.func = my_search
+
+        defs = make_tooldefs([mock_tool])
+        log = make_log(defs)
+        log.execute("search_db", {"query": "test"})
+        assert call_log == [("search", "test")]
+
+    def test_make_tooldefs_dict_without_effect(self):
+        from effect_log.middleware.crewai import make_tooldefs
+
+        mock_tool = MagicMock()
+        mock_tool.name = "delete_record"
+        del mock_tool.func
+        mock_tool._run.return_value = "deleted"
+
+        defs = make_tooldefs([{"tool": mock_tool}])
+        log = make_log(defs)
+        log.execute("delete_record", {"id": "123"})
+        mock_tool._run.assert_called_once_with(id="123")
+
+
+class TestPydanticAIAutoClassify:
+    """Test Pydantic AI middleware accepts raw callables."""
+
+    def setup_method(self):
+        self.WrapperToolset, self.AbstractToolset = _mock_pydantic_ai()
+
+    def teardown_method(self):
+        for mod in ["pydantic_ai", "pydantic_ai.toolsets"]:
+            sys.modules.pop(mod, None)
+        sys.modules.pop("effect_log.middleware.pydantic_ai", None)
+
+    def test_make_tooldefs_raw_callables(self):
+        from effect_log.middleware.pydantic_ai import make_tooldefs
+
+        call_log = []
+
+        def search_db(query: str = "") -> str:
+            call_log.append(("search", query))
+            return f"results for {query}"
+
+        def send_email(to: str = "") -> str:
+            call_log.append(("email", to))
+            return f"sent to {to}"
+
+        defs = make_tooldefs([search_db, send_email])
+        assert len(defs) == 2
+
+        log = make_log(defs)
+        log.execute("search_db", {"query": "test"})
+        log.execute("send_email", {"to": "ceo@co.com"})
+        assert call_log == [("search", "test"), ("email", "ceo@co.com")]
+
+    def test_make_tooldefs_mixed(self):
+        from effect_log.middleware.pydantic_ai import make_tooldefs
+
+        call_log = []
+
+        def search_db(query: str = "") -> str:
+            call_log.append(("search", query))
+            return f"results for {query}"
+
+        def process_order(order_id: str = "") -> str:
+            call_log.append(("order", order_id))
+            return f"processed {order_id}"
+
+        defs = make_tooldefs(
+            [
+                search_db,
+                {"func": process_order, "effect": EffectKind.IdempotentWrite},
+            ]
+        )
+
+        log = make_log(defs)
+        log.execute("search_db", {"query": "test"})
+        log.execute("process_order", {"order_id": "ORD-1"})
+        assert call_log == [("search", "test"), ("order", "ORD-1")]

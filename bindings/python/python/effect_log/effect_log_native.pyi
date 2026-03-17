@@ -25,6 +25,9 @@ class ToolDef:
     ) -> None: ...
 
 class EffectLog:
+    """Native EffectLog. Prefer using effect_log.EffectLog (Python wrapper)
+    which adds auto-classification support."""
+
     def __init__(
         self,
         execution_id: str,

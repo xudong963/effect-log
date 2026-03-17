@@ -75,24 +75,33 @@ class EffectLoggedCrewAITool:
 def make_tooldefs(tool_specs):
     """Create ToolDef entries from CrewAI SDK tool objects.
 
-    Eliminates the need to define tool functions twice — once for the SDK
-    and once for EffectLog. Handles both custom @tool functions (which have
-    a .func attribute) and pre-built tools (which use ._run()).
+    Accepts raw LangChain/CrewAI tools (auto-classified) or dicts with explicit effects.
 
     Args:
-        tool_specs: List of dicts with keys:
-            - "tool": A CrewAI BaseTool or @tool-decorated function
-            - "effect": The EffectKind for this tool
+        tool_specs: List of:
+            - CrewAI BaseTool instances (auto-classified by name), or
+            - dicts with keys "tool" and optional "effect" (EffectKind)
 
     Returns:
         List of ToolDef instances ready for EffectLog construction.
     """
     from effect_log import ToolDef
+    from effect_log.classify import classify_from_name
 
     defs = []
     for spec in tool_specs:
-        tool, effect = spec["tool"], spec["effect"]
+        if isinstance(spec, dict):
+            tool = spec["tool"]
+            effect = spec.get("effect")
+        else:
+            tool = spec
+            effect = None
+
         name = getattr(tool, "name", getattr(tool, "__name__", str(tool)))
+
+        if effect is None:
+            effect = classify_from_name(name).effect_kind
+
         fn = getattr(tool, "func", None)
         if fn is not None:
 
@@ -138,7 +147,7 @@ def effect_logged_crew(
     Args:
         log: An initialized EffectLog instance.
         crew: A CrewAI Crew instance.
-        tool_effects: Optional dict mapping tool name → EffectKind.
+        tool_effects: Optional dict mapping tool name -> EffectKind.
 
     Returns:
         The crew with all agent tools replaced by effect-logged wrappers.
