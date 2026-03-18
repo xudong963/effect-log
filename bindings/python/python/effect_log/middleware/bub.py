@@ -94,7 +94,7 @@ class EffectLoggedToolExecutor:
         return "\n".join(results) if results else "No tools executed."
 
 
-def make_tooldefs(tool_specs):
+def make_tooldefs(tool_specs, mode=None):
     """Create ToolDef entries from bub Tool classes.
 
     Accepts raw bub Tool classes (auto-classified) or dicts with explicit effects.
@@ -103,6 +103,7 @@ def make_tooldefs(tool_specs):
         tool_specs: List of:
             - bub Tool classes (auto-classified by tool name), or
             - dicts with keys "tool_class" and optional "effect" (EffectKind)
+        mode: Optional ClassifyMode for validation.
 
     Returns:
         List of ToolDef instances ready for EffectLog construction.
@@ -110,15 +111,31 @@ def make_tooldefs(tool_specs):
     _ensure_bub()
     from bub.agent.tools import Context
 
+    from effect_log import ClassifyMode
     from effect_log import ToolDef as ELToolDef
     from effect_log.classify import classify_from_name
+
+    if mode is None:
+        mode = ClassifyMode.HYBRID
 
     defs = []
     for spec in tool_specs:
         if isinstance(spec, dict):
             tool_class = spec["tool_class"]
             effect = spec.get("effect")
+            if mode is ClassifyMode.AUTO and effect is not None:
+                raise TypeError(
+                    "In AUTO mode, specs must not include an explicit 'effect' key."
+                )
+            if mode is ClassifyMode.MANUAL and effect is None:
+                raise TypeError(
+                    "In MANUAL mode, all specs must include an explicit 'effect' key."
+                )
         else:
+            if mode is ClassifyMode.MANUAL:
+                raise TypeError(
+                    "In MANUAL mode, all specs must include an explicit 'effect' key."
+                )
             tool_class = spec
             effect = None
 

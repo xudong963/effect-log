@@ -18,22 +18,35 @@ Every tool has an **effect kind** that drives all recovery behavior:
 
 ## Quick Start
 
-Just pass functions — effect-log classifies them automatically:
+### Auto mode — just pass functions
 
 ```python
 from effect_log import EffectLog
 
-log = EffectLog("task-001", tools=[search_db, send_email, upsert_record])
+log = EffectLog.auto("task-001", tools=[search_db, send_email, upsert_record])
 log.execute("search_db", {"query": "Q4 revenue"})     # auto → ReadOnly
 log.execute("send_email", {"to": "ceo@co.com", ...})  # auto → IrreversibleWrite
 log.execute("upsert_record", {"id": "r-001", ...})    # auto → IdempotentWrite
 ```
 
-Recovery — just add `recover=True`, re-run the same steps:
+### Manual mode — explicit ToolDef for full control
 
 ```python
-log = EffectLog("task-001", tools=[search_db, send_email, upsert_record],
-                storage="sqlite:///effects.db", recover=True)
+from effect_log import EffectKind, EffectLog, ToolDef
+
+tools = [
+    ToolDef("read_file",  EffectKind.ReadOnly,         read_file),
+    ToolDef("send_email", EffectKind.IrreversibleWrite, send_email),
+    ToolDef("upsert",     EffectKind.IdempotentWrite,   upsert_record),
+]
+log = EffectLog.manual("task-001", tools=tools, storage="sqlite:///effects.db")
+```
+
+### Recovery — just add `recover=True`
+
+```python
+log = EffectLog.auto("task-001", tools=[search_db, send_email, upsert_record],
+                     storage="sqlite:///effects.db", recover=True)
 log.execute("search_db", {"query": "Q4 revenue"})     # Replayed (fresh data)
 log.execute("send_email", {"to": "ceo@co.com", ...})  # Sealed — NOT re-sent
 log.execute("upsert_record", {"id": "r-001", ...})    # Replayed (idempotent)
@@ -46,7 +59,7 @@ If the classifier gets something wrong, override just that tool:
 ```python
 from effect_log import EffectKind, EffectLog
 
-log = EffectLog("task-001",
+log = EffectLog.auto("task-001",
     tools=[search_db, send_email, process_order],
     overrides={"process_order": EffectKind.IdempotentWrite}
 )
@@ -68,17 +81,17 @@ tools = report.apply(overrides={"process_order": EffectKind.IdempotentWrite})
 log = EffectLog("task-001", tools=tools)
 ```
 
-### Explicit ToolDef still works
+### Hybrid mode (default constructor)
+
+The default constructor accepts a mix of callables and ToolDefs:
 
 ```python
-from effect_log import EffectKind, EffectLog, ToolDef
+from effect_log import EffectLog, ToolDef, EffectKind
 
-tools = [
-    ToolDef("read_file",  EffectKind.ReadOnly,         read_file),
-    ToolDef("send_email", EffectKind.IrreversibleWrite, send_email),
-    ToolDef("upsert",     EffectKind.IdempotentWrite,   upsert_record),
-]
-log = EffectLog(execution_id="task-001", tools=tools, storage="sqlite:///effects.db")
+log = EffectLog("task-001", tools=[
+    search_db,                                               # auto-classified
+    ToolDef("send_email", EffectKind.IrreversibleWrite, send_email),  # explicit
+])
 ```
 
 ### Decorators

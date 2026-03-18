@@ -33,7 +33,7 @@ def _ensure_openai_agents():
         )
 
 
-def make_tools(specs):
+def make_tools(specs, mode=None):
     """Create both FunctionTool and ToolDef entries from raw functions.
 
     Accepts raw callables (auto-classified) or dicts with explicit effects.
@@ -42,22 +42,38 @@ def make_tools(specs):
         specs: List of:
             - callables (auto-classified), or
             - dicts with keys "func" and optional "effect" (EffectKind)
+        mode: Optional ClassifyMode for validation.
 
     Returns:
         Tuple of (list[FunctionTool], list[ToolDef]).
     """
     _ensure_openai_agents()
     from agents import function_tool as ft
-    from effect_log import ToolDef
+    from effect_log import ClassifyMode, ToolDef
     from effect_log.classify import classify_effect_kind
+
+    if mode is None:
+        mode = ClassifyMode.HYBRID
 
     sdk_tools, tooldefs = [], []
     for spec in specs:
         if callable(spec):
+            if mode is ClassifyMode.MANUAL:
+                raise TypeError(
+                    "In MANUAL mode, all specs must include an explicit 'effect' key."
+                )
             fn, effect = spec, None
         elif isinstance(spec, dict):
             fn = spec["func"]
             effect = spec.get("effect")
+            if mode is ClassifyMode.AUTO and effect is not None:
+                raise TypeError(
+                    "In AUTO mode, specs must not include an explicit 'effect' key."
+                )
+            if mode is ClassifyMode.MANUAL and effect is None:
+                raise TypeError(
+                    "In MANUAL mode, all specs must include an explicit 'effect' key."
+                )
         else:
             raise TypeError(f"Expected callable or dict, got {type(spec).__name__}")
 

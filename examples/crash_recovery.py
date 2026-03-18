@@ -63,7 +63,7 @@ def main():
     # === First execution: steps 1-3, then "crash" ===
     print("\n--- First Execution (steps 1-3, then crash) ---\n")
 
-    log = EffectLog(execution_id="demo-001", tools=tools, storage=storage)
+    log = EffectLog.manual(execution_id="demo-001", tools=tools, storage=storage)
 
     r1 = log.execute("fetch_data", {"source": "https://api.example.com/data"})
     print(f"Step 1 [fetch_data]:  {r1}")
@@ -96,7 +96,7 @@ def main():
         make_counting_tool("log_result", EffectKind.ReadOnly),
     ]
 
-    log2 = EffectLog(
+    log2 = EffectLog.manual(
         execution_id="demo-001",
         tools=tools2,
         storage=storage,

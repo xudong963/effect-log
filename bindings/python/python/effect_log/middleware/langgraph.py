@@ -81,6 +81,7 @@ class EffectLoggedTool:
 def effect_logged_tools(
     log: EffectLog,
     tool_specs: Sequence[Any],
+    mode=None,
 ) -> list[EffectLoggedTool]:
     """Wrap a list of LangChain tools with effect-log tracking.
 
@@ -91,17 +92,36 @@ def effect_logged_tools(
         tool_specs: List of:
             - LangChain BaseTool instances (auto-classified by name), or
             - dicts with keys "tool" and optional "effect" (EffectKind)
+        mode: Optional ClassifyMode for validation.
 
     Returns:
         List of EffectLoggedTool wrappers compatible with LangGraph's ToolNode.
     """
+    from effect_log import ClassifyMode
+
     _ensure_langgraph()
+
+    if mode is None:
+        mode = ClassifyMode.HYBRID
+
     wrapped = []
     for spec in tool_specs:
         if isinstance(spec, dict):
             tool = spec["tool"]
             effect = spec.get("effect")
+            if mode is ClassifyMode.AUTO and effect is not None:
+                raise TypeError(
+                    "In AUTO mode, specs must not include an explicit 'effect' key."
+                )
+            if mode is ClassifyMode.MANUAL and effect is None:
+                raise TypeError(
+                    "In MANUAL mode, all specs must include an explicit 'effect' key."
+                )
         else:
+            if mode is ClassifyMode.MANUAL:
+                raise TypeError(
+                    "In MANUAL mode, all specs must include an explicit 'effect' key."
+                )
             tool = spec
             effect = None
 
@@ -114,7 +134,7 @@ def effect_logged_tools(
     return wrapped
 
 
-def make_tooldefs(tool_specs):
+def make_tooldefs(tool_specs, mode=None):
     """Create ToolDef entries from LangChain SDK tool objects.
 
     Accepts raw LangChain tools (auto-classified) or dicts with explicit effects.
@@ -123,19 +143,35 @@ def make_tooldefs(tool_specs):
         tool_specs: List of:
             - LangChain BaseTool instances (auto-classified by name), or
             - dicts with keys "tool" and optional "effect" (EffectKind)
+        mode: Optional ClassifyMode for validation.
 
     Returns:
         List of ToolDef instances ready for EffectLog construction.
     """
-    from effect_log import ToolDef
+    from effect_log import ClassifyMode, ToolDef
     from effect_log.classify import classify_from_name
+
+    if mode is None:
+        mode = ClassifyMode.HYBRID
 
     defs = []
     for spec in tool_specs:
         if isinstance(spec, dict):
             tool = spec["tool"]
             effect = spec.get("effect")
+            if mode is ClassifyMode.AUTO and effect is not None:
+                raise TypeError(
+                    "In AUTO mode, specs must not include an explicit 'effect' key."
+                )
+            if mode is ClassifyMode.MANUAL and effect is None:
+                raise TypeError(
+                    "In MANUAL mode, all specs must include an explicit 'effect' key."
+                )
         else:
+            if mode is ClassifyMode.MANUAL:
+                raise TypeError(
+                    "In MANUAL mode, all specs must include an explicit 'effect' key."
+                )
             tool = spec
             effect = None
 

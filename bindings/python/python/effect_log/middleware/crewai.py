@@ -72,7 +72,7 @@ class EffectLoggedCrewAITool:
         return self.run(*args, **kwargs)
 
 
-def make_tooldefs(tool_specs):
+def make_tooldefs(tool_specs, mode=None):
     """Create ToolDef entries from CrewAI SDK tool objects.
 
     Accepts raw LangChain/CrewAI tools (auto-classified) or dicts with explicit effects.
@@ -81,19 +81,35 @@ def make_tooldefs(tool_specs):
         tool_specs: List of:
             - CrewAI BaseTool instances (auto-classified by name), or
             - dicts with keys "tool" and optional "effect" (EffectKind)
+        mode: Optional ClassifyMode for validation.
 
     Returns:
         List of ToolDef instances ready for EffectLog construction.
     """
-    from effect_log import ToolDef
+    from effect_log import ClassifyMode, ToolDef
     from effect_log.classify import classify_from_name
+
+    if mode is None:
+        mode = ClassifyMode.HYBRID
 
     defs = []
     for spec in tool_specs:
         if isinstance(spec, dict):
             tool = spec["tool"]
             effect = spec.get("effect")
+            if mode is ClassifyMode.AUTO and effect is not None:
+                raise TypeError(
+                    "In AUTO mode, specs must not include an explicit 'effect' key."
+                )
+            if mode is ClassifyMode.MANUAL and effect is None:
+                raise TypeError(
+                    "In MANUAL mode, all specs must include an explicit 'effect' key."
+                )
         else:
+            if mode is ClassifyMode.MANUAL:
+                raise TypeError(
+                    "In MANUAL mode, all specs must include an explicit 'effect' key."
+                )
             tool = spec
             effect = None
 

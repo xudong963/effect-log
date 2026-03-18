@@ -1,5 +1,7 @@
 """effect-log: Semantic side-effect tracking for AI agents."""
 
+from enum import Enum
+
 from effect_log.effect_log_native import (
     EffectKind,
     EffectLog as _NativeEffectLog,
@@ -12,7 +14,22 @@ from effect_log.classify import (
     classify_with_llm,
 )
 
+
+class ClassifyMode(Enum):
+    """Controls how tools are classified in an EffectLog.
+
+    AUTO    — all tools are raw callables; effect kinds are inferred automatically.
+    MANUAL  — all tools are explicit ToolDef instances; no auto-classification.
+    HYBRID  — mixed: callables are auto-classified, ToolDefs pass through as-is.
+    """
+
+    AUTO = "auto"
+    MANUAL = "manual"
+    HYBRID = "hybrid"
+
+
 __all__ = [
+    "ClassifyMode",
     "EffectKind",
     "EffectLog",
     "ToolDef",
@@ -49,6 +66,7 @@ class EffectLog:
         recover: Whether to recover from a previous execution.
         overrides: Optional dict mapping function name -> EffectKind
                    to override auto-classification.
+        mode: ClassifyMode controlling validation (default HYBRID).
     """
 
     def __init__(
@@ -58,13 +76,30 @@ class EffectLog:
         storage: str = "memory",
         recover: bool = False,
         overrides: dict[str, EffectKind] | None = None,
+        mode: ClassifyMode = ClassifyMode.HYBRID,
     ):
+        if mode is ClassifyMode.MANUAL and overrides:
+            raise ValueError(
+                "overrides= is not supported in MANUAL mode. "
+                "Remove overrides or use HYBRID mode."
+            )
+
         overrides = overrides or {}
         processed = []
         for t in tools:
             if isinstance(t, ToolDef):
+                if mode is ClassifyMode.AUTO:
+                    raise TypeError(
+                        "In AUTO mode, pass raw callables instead of ToolDef. "
+                        "Use MANUAL or HYBRID mode for explicit ToolDef."
+                    )
                 processed.append(t)
             elif callable(t):
+                if mode is ClassifyMode.MANUAL:
+                    raise TypeError(
+                        "In MANUAL mode, all tools must be ToolDef instances. "
+                        "Use EffectLog.auto() or HYBRID mode for raw callables."
+                    )
                 name = getattr(t, "__name__", str(t))
                 kind = overrides.get(name)
                 if kind is None:
@@ -73,6 +108,42 @@ class EffectLog:
             else:
                 raise TypeError(f"Expected ToolDef or callable, got {type(t).__name__}")
         self._inner = _NativeEffectLog(execution_id, processed, storage, recover)
+
+    @classmethod
+    def auto(
+        cls,
+        execution_id: str,
+        tools: list,
+        storage: str = "memory",
+        recover: bool = False,
+        overrides: dict[str, EffectKind] | None = None,
+    ) -> "EffectLog":
+        """Create an EffectLog in AUTO mode — all tools are raw callables."""
+        return cls(
+            execution_id=execution_id,
+            tools=tools,
+            storage=storage,
+            recover=recover,
+            overrides=overrides,
+            mode=ClassifyMode.AUTO,
+        )
+
+    @classmethod
+    def manual(
+        cls,
+        execution_id: str,
+        tools: list,
+        storage: str = "memory",
+        recover: bool = False,
+    ) -> "EffectLog":
+        """Create an EffectLog in MANUAL mode — all tools must be ToolDef."""
+        return cls(
+            execution_id=execution_id,
+            tools=tools,
+            storage=storage,
+            recover=recover,
+            mode=ClassifyMode.MANUAL,
+        )
 
     def execute(self, tool_name: str, args: dict):
         """Execute a tool through the effect-log WAL."""

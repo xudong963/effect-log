@@ -74,7 +74,7 @@ class EffectLogToolset:
         return self._wrapper
 
 
-def make_tooldefs(tool_specs):
+def make_tooldefs(tool_specs, mode=None):
     """Create ToolDef entries from raw functions for pydantic-ai tools.
 
     Accepts raw callables (auto-classified) or dicts with explicit effects.
@@ -83,20 +83,36 @@ def make_tooldefs(tool_specs):
         tool_specs: List of:
             - callables (auto-classified), or
             - dicts with keys "func" and optional "effect" (EffectKind)
+        mode: Optional ClassifyMode for validation.
 
     Returns:
         List of ToolDef instances ready for EffectLog construction.
     """
-    from effect_log import ToolDef
+    from effect_log import ClassifyMode, ToolDef
     from effect_log.classify import classify_effect_kind
+
+    if mode is None:
+        mode = ClassifyMode.HYBRID
 
     defs = []
     for spec in tool_specs:
         if callable(spec):
+            if mode is ClassifyMode.MANUAL:
+                raise TypeError(
+                    "In MANUAL mode, all specs must include an explicit 'effect' key."
+                )
             fn, effect = spec, None
         elif isinstance(spec, dict):
             fn = spec["func"]
             effect = spec.get("effect")
+            if mode is ClassifyMode.AUTO and effect is not None:
+                raise TypeError(
+                    "In AUTO mode, specs must not include an explicit 'effect' key."
+                )
+            if mode is ClassifyMode.MANUAL and effect is None:
+                raise TypeError(
+                    "In MANUAL mode, all specs must include an explicit 'effect' key."
+                )
         else:
             raise TypeError(f"Expected callable or dict, got {type(spec).__name__}")
 
